@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Флэш</string>
+    <string name="onboarding_tagline">Прикоснитесь для слияния. Накормите ядро.</string>
+    <string name="onboarding_button">Понял</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_language">Язык</string>
+    <string name="settings_theme">Тема</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="theme_system">Системная</string>
+    <string name="lang_en">English</string>
+    <string name="lang_ru">Русский</string>
+    <string name="transfer_waiting">Ожидание касания…</string>
+    <string name="transfer_connecting">Подключение…</string>
+    <string name="transfer_progress">Передача %1$d%%</string>
+    <string name="transfer_complete">Готово!</string>
+    <string name="exit_button">Выход</string>
+    <string name="cd_settings">Настройки</string>
+    <string name="cd_core">Главное ядро</string>
+</resources>
