@@ -21,18 +21,20 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # Proper update: Use the existing 8.5 wrapper to upgrade to 8.7
+      # Use system gradle to fix the local wrapper without triggering project config
       - name: Update Gradle Wrapper to 8.7
         run: |
-          chmod +x gradlew
-          ./gradlew wrapper --gradle-version 8.7
+          gradle wrapper --gradle-version 8.7
 
-      # This pushes the 8.7 files back to your repo automatically
+      # Pushes the 8.7 files back to your repo so it's fixed forever
       - name: Commit and Push Wrapper Update
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Auto-fix: Updated Gradle Wrapper to 8.7"
+          commit_message: "Auto-fix: Updated Gradle Wrapper to 8.7 via system gradle"
           file_pattern: 'gradlew gradlew.bat gradle/*'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
@@ -40,7 +42,6 @@ jobs:
       - name: Get version name
         id: version
         run: |
-          # Fallback to 1.0 if the task doesn't exist yet
           VERSION=$(./gradlew -q printVersionName 2>/dev/null || echo "1.0")
           SHORT_SHA="${GITHUB_SHA::7}"
           echo "tag=v${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
@@ -53,7 +54,7 @@ jobs:
           name: ${{ steps.version.outputs.name }}
           body: |
             Debug build from commit ${{ github.sha }}
-            
+
             **Install:** enable *Install unknown apps* on your device, download the APK below and open it.
           files: app/build/outputs/apk/debug/app-debug.apk
           make_latest: true
