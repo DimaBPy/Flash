@@ -24,7 +24,7 @@ jobs:
       - name: Generate Gradle Wrapper
         run: |
           if [ ! -f gradlew ]; then
-            gradle wrapper --gradle-version 8.5
+            gradle wrapper --gradle-version 8.7
           fi
 
       # 2. Push those files back to your repo so it's fixed forever
