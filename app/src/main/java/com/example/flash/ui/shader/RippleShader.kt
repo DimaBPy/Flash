@@ -10,14 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Canvas
-import androidx.compose.ui.graphics.layer.GraphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
-import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.foundation.Canvas
 
 private const val RIPPLE_AGSL = """
 uniform float2 u_resolution;
@@ -73,28 +68,22 @@ private fun RippleOverlayAgsl(
         android.graphics.RuntimeShader(RIPPLE_AGSL)
     }
 
-    androidx.compose.foundation.Canvas(
-        modifier = modifier.fillMaxSize()
-    ) {
+    Canvas(modifier = modifier.fillMaxSize()) {
         shader.setFloatUniform("u_resolution", size.width, size.height)
         shader.setFloatUniform("u_core_center", coreCenter.x, coreCenter.y)
         shader.setFloatUniform("u_time", time.value)
 
         drawIntoCanvas { canvas ->
-            val paint = android.graphics.Paint().apply {
-                shaderFactory = null
-            }
-            // Draw a subtle radial ripple overlay using the AGSL values
             val ripplePaint = android.graphics.Paint().apply {
                 isAntiAlias = true
-                alpha = (80 * (1f - time.value / 3f)).toInt().coerceIn(0, 255)
                 style = android.graphics.Paint.Style.STROKE
                 strokeWidth = 4f
                 color = android.graphics.Color.CYAN
+                setShader(shader)
             }
             val elapsed = time.value
             for (i in 0..3) {
-                val radius = (elapsed * 200f + i * 60f)
+                val radius = elapsed * 200f + i * 60f
                 val alpha = ((1f - (radius / 800f)).coerceIn(0f, 1f) * 180).toInt()
                 ripplePaint.alpha = alpha
                 canvas.nativeCanvas.drawCircle(coreCenter.x, coreCenter.y, radius, ripplePaint)

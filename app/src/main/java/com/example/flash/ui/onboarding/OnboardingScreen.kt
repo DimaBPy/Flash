@@ -76,8 +76,10 @@ fun OnboardingScreen(
 
         Button(
             onClick = {
-                scope.launch { themeRepository.setOnboardingShown() }
-                onComplete()
+                scope.launch {
+                    themeRepository.setOnboardingShown()
+                    onComplete()
+                }
             },
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(containerColor = OceanAqua),

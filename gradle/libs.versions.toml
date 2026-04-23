@@ -1,6 +1,6 @@
 [versions]
 agp = "8.5.2"
-kotlin = "2.0.21"
+kotlin = "2.1.20"
 composeBom = "2024.12.01"
 material3 = "1.4.0-alpha11"
 backdrop = "2.0.0-alpha03"

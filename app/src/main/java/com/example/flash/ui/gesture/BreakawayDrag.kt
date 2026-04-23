@@ -28,8 +28,10 @@ fun Modifier.breakawayDrag(
     val context = LocalContext.current
 
     var isDragging by remember { mutableStateOf(false) }
+    var isDropped by remember { mutableStateOf(false) }   // one-shot guard
     var accumulatedDrag by remember { mutableStateOf(Offset.Zero) }
     var startPosition by remember { mutableStateOf(Offset.Zero) }
+    var lastSpherize by remember { mutableStateOf(0f) }
 
     val threshold = with(density) { 30.dp.toPx() }
 
@@ -39,32 +41,41 @@ fun Modifier.breakawayDrag(
                 startPosition = offset
                 accumulatedDrag = Offset.Zero
                 isDragging = false
+                isDropped = false
+                lastSpherize = 0f
             },
             onDrag = { change, dragAmount ->
                 change.consume()
                 accumulatedDrag += dragAmount
 
-                // Upward drag (negative y) beyond threshold triggers breakaway
+                // Upward drag beyond threshold enters breakaway mode (once per gesture)
                 if (!isDragging && -accumulatedDrag.y > threshold) {
                     isDragging = true
                     onDragStart()
                     triggerHaptic(context)
                 }
 
-                if (isDragging) {
+                if (isDragging && !isDropped) {
+                    // Compute spherize for visual morphing only — no side effects here
                     val distanceTraveled = accumulatedDrag.getDistance()
                     val totalDistance = (startPosition - coreCenter).getDistance()
-                    val spherize = (distanceTraveled / totalDistance.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                    onDragToCore(spherize)
+                    lastSpherize = (distanceTraveled / totalDistance.coerceAtLeast(1f)).coerceIn(0f, 1f)
                 }
             },
             onDragEnd = {
-                if (!isDragging) onDragCancel()
+                if (isDragging && !isDropped) {
+                    // Fire transfer setup exactly once when the gesture ends
+                    isDropped = true
+                    onDragToCore(lastSpherize)
+                } else if (!isDragging) {
+                    onDragCancel()
+                }
                 isDragging = false
                 accumulatedDrag = Offset.Zero
             },
             onDragCancel = {
                 isDragging = false
+                isDropped = false
                 accumulatedDrag = Offset.Zero
                 onDragCancel()
             }

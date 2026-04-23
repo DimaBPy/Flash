@@ -2,7 +2,9 @@ package com.example.flash.transfer
 
 import android.content.Context
 import android.net.Uri
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +31,8 @@ class TransferRepository(
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
 
+    private var downloadJob: Job? = null
+
     suspend fun startServing(token: String, fileUri: Uri, context: Context): Int {
         _transferState.value = TransferState.Idle
         val port = server.start(token, fileUri, context)
@@ -37,7 +41,8 @@ class TransferRepository(
     }
 
     fun startDownload(ip: String, port: Int, token: String, context: Context) {
-        scope.launch {
+        downloadJob?.cancel()
+        downloadJob = scope.launch {
             try {
                 _progressFlow.value = 0f
                 _transferState.value = TransferState.Downloading(0f)
@@ -49,6 +54,9 @@ class TransferRepository(
                 }
 
                 _transferState.value = TransferState.Complete(file)
+            } catch (e: CancellationException) {
+                // Cancelled intentionally — leave state as Idle (set by stopAll)
+                throw e
             } catch (e: Exception) {
                 _transferState.value = TransferState.Failed(e.message ?: "Unknown error")
             }
@@ -56,6 +64,8 @@ class TransferRepository(
     }
 
     fun stopAll() {
+        downloadJob?.cancel()
+        downloadJob = null
         server.stop()
         _transferState.value = TransferState.Idle
         _progressFlow.value = 0f

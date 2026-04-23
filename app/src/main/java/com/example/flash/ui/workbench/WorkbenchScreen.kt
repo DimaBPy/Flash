@@ -190,7 +190,7 @@ fun WorkbenchScreen(
                 progress = uiState.transferProgress,
                 isReceiving = uiState.isReceiving,
                 shouldExit = uiState.shouldExit,
-                onAnimationComplete = { /* activity finish handled externally */ }
+                onAnimationComplete = { (context as? android.app.Activity)?.finish() }
             )
         }
 

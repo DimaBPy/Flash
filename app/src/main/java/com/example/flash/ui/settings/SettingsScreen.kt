@@ -104,10 +104,12 @@ fun SettingsScreen(
                     SegmentedButton(
                         selected = language == lang || (language.isEmpty() && lang == "en"),
                         onClick = {
-                            scope.launch { themeRepository.setLanguage(lang) }
-                            AppCompatDelegate.setApplicationLocales(
-                                LocaleListCompat.forLanguageTags(lang)
-                            )
+                            scope.launch {
+                                themeRepository.setLanguage(lang)
+                                AppCompatDelegate.setApplicationLocales(
+                                    LocaleListCompat.forLanguageTags(lang)
+                                )
+                            }
                         },
                         shape = SegmentedButtonDefaults.itemShape(index, langs.size),
                         label = {
