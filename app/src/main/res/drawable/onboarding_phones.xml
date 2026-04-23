@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="240dp"
+            android:height="160dp"
+            android:viewportWidth="240"
+            android:viewportHeight="160">
+
+            <!-- Left phone outline -->
+            <group android:name="leftPhone" android:translateX="-60">
+                <path
+                    android:name="leftPhonePath"
+                    android:strokeColor="#00FFFF"
+                    android:strokeWidth="3"
+                    android:fillColor="#00000000"
+                    android:pathData="M64,40 Q64,30 74,30 L90,30 Q100,30 100,40 L100,120 Q100,130 90,130 L74,130 Q64,130 64,120 Z" />
+                <path
+                    android:strokeColor="#00FFFF"
+                    android:strokeWidth="2"
+                    android:strokeAlpha="0.5"
+                    android:pathData="M76,120 L88,120" />
+            </group>
+
+            <!-- Right phone outline -->
+            <group android:name="rightPhone" android:translateX="60">
+                <path
+                    android:name="rightPhonePath"
+                    android:strokeColor="#00FFFF"
+                    android:strokeWidth="3"
+                    android:fillColor="#00000000"
+                    android:pathData="M140,40 Q140,30 150,30 L166,30 Q176,30 176,40 L176,120 Q176,130 166,130 L150,130 Q140,130 140,120 Z" />
+                <path
+                    android:strokeColor="#00FFFF"
+                    android:strokeWidth="2"
+                    android:strokeAlpha="0.5"
+                    android:pathData="M152,120 L164,120" />
+            </group>
+
+        </vector>
+    </aapt:attr>
+
+    <!-- Animate left phone sliding right -->
+    <target android:name="leftPhone">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator
+                    android:propertyName="translateX"
+                    android:valueFrom="-60"
+                    android:valueTo="0"
+                    android:duration="1200"
+                    android:repeatCount="infinite"
+                    android:repeatMode="reverse"
+                    android:interpolator="@android:interpolator/accelerate_decelerate" />
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- Animate right phone sliding left -->
+    <target android:name="rightPhone">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator
+                    android:propertyName="translateX"
+                    android:valueFrom="60"
+                    android:valueTo="0"
+                    android:duration="1200"
+                    android:repeatCount="infinite"
+                    android:repeatMode="reverse"
+                    android:interpolator="@android:interpolator/accelerate_decelerate" />
+            </set>
+        </aapt:attr>
+    </target>
+
+</animated-vector>
