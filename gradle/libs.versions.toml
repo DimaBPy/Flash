@@ -1,5 +1,6 @@
 [versions]
-agp = "8.5.2"
+# Updated to 8.7.0 to satisfy Material3 and Compose dependencies
+agp = "8.7.0"
 kotlin = "2.1.20"
 composeBom = "2024.12.01"
 material3 = "1.4.0-alpha11"
