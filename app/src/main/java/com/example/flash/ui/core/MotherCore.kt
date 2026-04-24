@@ -40,9 +40,9 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val CONTROL_POINTS = 8
-private const val BASE_RADIUS_DP  = 56f
-private const val NOISE_OFFSET_DP = 10f
+private const val CONTROL_POINTS  = 16
+private const val BASE_RADIUS_DP  = 60f
+private const val NOISE_OFFSET_DP = 14f
 
 @Composable
 fun MotherCore(
@@ -82,34 +82,44 @@ fun MotherCore(
         }
     }
 
-    val blobSize = (BASE_RADIUS_DP * 2 + NOISE_OFFSET_DP * 2 + 24f).dp
-    val scaleValue = exitScale.value
+    val blobSize = (BASE_RADIUS_DP * 2 + NOISE_OFFSET_DP * 2 + 32f).dp
 
-    Box(modifier = modifier.size(blobSize).scale(scaleValue)) {
+    Box(modifier = modifier.size(blobSize).scale(exitScale.value)) {
 
-        // ── Layer 1: Outer neon pulse (dark mode only, hardware-blurred) ──────
+        // Layer 1a: Primary outer glow (dark mode only)
         if (isDark) {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(28.dp)
-            ) {
-                val t = time.toDouble()
-                val path = buildBlobPath(center.x, center.y, BASE_RADIUS_DP.dp.toPx(), NOISE_OFFSET_DP.dp.toPx(), t)
-                drawPath(path, color = AquaPulse)
+            Canvas(modifier = Modifier.fillMaxSize().blur(32.dp)) {
+                drawPath(
+                    buildBlobPath(center.x, center.y, BASE_RADIUS_DP.dp.toPx(), NOISE_OFFSET_DP.dp.toPx(), time.toDouble()),
+                    color = AquaPulse
+                )
+            }
+            // Layer 1b: Wider ambient halo
+            Canvas(modifier = Modifier.fillMaxSize().blur(56.dp)) {
+                drawPath(
+                    buildBlobPath(center.x, center.y, BASE_RADIUS_DP.dp.toPx(), NOISE_OFFSET_DP.dp.toPx(), time.toDouble()),
+                    color = AquaPulse.copy(alpha = 0.35f)
+                )
+            }
+        } else {
+            // Light mode: subtle teal rim
+            Canvas(modifier = Modifier.fillMaxSize().blur(8.dp)) {
+                drawPath(
+                    buildBlobPath(center.x, center.y, BASE_RADIUS_DP.dp.toPx(), NOISE_OFFSET_DP.dp.toPx(), time.toDouble()),
+                    color = AquaPulse.copy(alpha = 0.55f)
+                )
             }
         }
 
-        // ── Layer 2: Core solid fill + hollow/crystallize ─────────────────────
+        // Layer 2: Core fill + hollow/crystallize (Offscreen so BlendMode.Clear works)
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
         ) {
-            val t     = time.toDouble()
-            val baseR = BASE_RADIUS_DP.dp.toPx()
+            val baseR  = BASE_RADIUS_DP.dp.toPx()
             val noiseR = NOISE_OFFSET_DP.dp.toPx()
-            val path  = buildBlobPath(center.x, center.y, baseR, noiseR, t)
+            val path   = buildBlobPath(center.x, center.y, baseR, noiseR, time.toDouble())
 
             drawPath(path, color = OceanAqua)
 
@@ -117,10 +127,10 @@ fun MotherCore(
                 val hollowR = baseR * hollowProgress * 0.85f
                 clipPath(path) {
                     drawCircle(
-                        color      = Color.Black,
-                        radius     = hollowR,
-                        center     = center,
-                        blendMode  = BlendMode.Clear
+                        color     = Color.Black,
+                        radius    = hollowR,
+                        center    = center,
+                        blendMode = BlendMode.Clear
                     )
                 }
                 if (crystallizedBitmap != null && hollowProgress > 0.2f) {
@@ -134,51 +144,54 @@ fun MotherCore(
             }
         }
 
-        // ── Layer 3: Glass inner shimmer (top-left highlight, blurred) ────────
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .blur(14.dp)
-        ) {
-            val t     = time.toDouble()
-            val baseR = BASE_RADIUS_DP.dp.toPx()
+        // Layer 3: Glass shimmer — soft radial highlight in upper-left
+        Canvas(modifier = Modifier.fillMaxSize().blur(14.dp)) {
+            val baseR  = BASE_RADIUS_DP.dp.toPx()
             val noiseR = NOISE_OFFSET_DP.dp.toPx()
-            val path  = buildBlobPath(center.x, center.y, baseR, noiseR, t)
+            val path   = buildBlobPath(center.x, center.y, baseR, noiseR, time.toDouble())
             clipPath(path) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors  = listOf(Color.White.copy(alpha = 0.55f), AquaGlow, Color.Transparent),
-                        center  = Offset(center.x - baseR * 0.22f, center.y - baseR * 0.38f),
-                        radius  = baseR * 0.7f
+                        colors  = listOf(Color.White.copy(alpha = 0.65f), AquaGlow, Color.Transparent),
+                        center  = Offset(center.x - baseR * 0.25f, center.y - baseR * 0.40f),
+                        radius  = baseR * 0.80f
                     ),
-                    radius = baseR * 0.7f,
-                    center = Offset(center.x - baseR * 0.22f, center.y - baseR * 0.38f)
+                    radius = baseR * 0.80f,
+                    center = Offset(center.x - baseR * 0.25f, center.y - baseR * 0.40f)
                 )
             }
         }
     }
 }
 
-private fun buildBlobPath(cx: Float, cy: Float, baseR: Float, noiseAmp: Float, time: Double): Path {
+// Catmull-Rom → cubic Bézier for a smooth, organic closed blob curve.
+// `internal` so PhotoOrbit can reuse it for photo shape morphing.
+internal fun buildBlobPath(cx: Float, cy: Float, baseR: Float, noiseAmp: Float, time: Double): Path {
     val path = Path()
-    val step = (2 * PI / CONTROL_POINTS)
-    val points = Array(CONTROL_POINTS) { i ->
+    val n    = CONTROL_POINTS
+    val step = 2 * PI / n
+    val pts  = Array(n) { i ->
         val angle = i * step
         val noise = PerlinNoise.octaveNoise(
-            cos(angle) + time * 0.0003,
-            sin(angle) + time * 0.0003,
-            octaves = 3, persistence = 0.6
+            cos(angle) * 1.5 + time * 0.0004,
+            sin(angle) * 1.5 + time * 0.0004,
+            octaves = 3, persistence = 0.55
         ).toFloat()
         val r = baseR + noise * noiseAmp
         Offset(cx + r * cos(angle).toFloat(), cy + r * sin(angle).toFloat())
     }
-    path.moveTo(points[0].x, points[0].y)
-    for (i in points.indices) {
-        val curr = points[i]
-        val next = points[(i + 1) % points.size]
-        val cp1  = Offset(curr.x + (next.x - curr.x) / 3f, curr.y + (next.y - curr.y) / 3f)
-        val cp2  = Offset(next.x - (next.x - curr.x) / 3f, next.y - (next.y - curr.y) / 3f)
-        path.cubicTo(cp1.x, cp1.y, cp2.x, cp2.y, next.x, next.y)
+
+    path.moveTo(pts[0].x, pts[0].y)
+    for (i in 0 until n) {
+        val p0 = pts[(i - 1 + n) % n]
+        val p1 = pts[i]
+        val p2 = pts[(i + 1)     % n]
+        val p3 = pts[(i + 2)     % n]
+        val cp1x = p1.x + (p2.x - p0.x) / 6f
+        val cp1y = p1.y + (p2.y - p0.y) / 6f
+        val cp2x = p2.x - (p3.x - p1.x) / 6f
+        val cp2y = p2.y - (p3.y - p1.y) / 6f
+        path.cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
     }
     path.close()
     return path

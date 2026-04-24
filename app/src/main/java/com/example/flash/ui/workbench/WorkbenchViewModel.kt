@@ -1,13 +1,16 @@
 package com.example.flash.ui.workbench
 
+import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.flash.nfc.NfcManager
 import com.example.flash.nfc.PeerHandshake
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.transfer.TransferState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,17 +51,14 @@ class WorkbenchViewModel(
     private var currentToken: String = ""
 
     init {
-        // Observe incoming NFC handshakes
         nfcManager.peerHandshakeFlow
             .onEach { handshake -> onNfcPeerDetected(handshake) }
             .launchIn(viewModelScope)
 
-        // Observe transfer state changes
         transferRepository.transferState
             .onEach { state -> onTransferStateChanged(state) }
             .launchIn(viewModelScope)
 
-        // Observe progress
         transferRepository.progressFlow
             .onEach { progress ->
                 _uiState.update { it.copy(transferProgress = progress) }
@@ -66,8 +66,33 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
     }
 
+    /** Loads up to 60 most-recent camera-roll images without any picker UI. */
+    fun loadGalleryPhotos(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val photos = mutableListOf<Uri>()
+            val projection = arrayOf(MediaStore.Images.Media._ID)
+            val sortOrder  = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection, null, null, sortOrder
+            )?.use { cursor ->
+                val col = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                while (cursor.moveToNext() && photos.size < 60) {
+                    photos.add(
+                        ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            cursor.getLong(col)
+                        )
+                    )
+                }
+            }
+            _uiState.update { it.copy(photos = photos) }
+        }
+    }
+
+    /** Appends manually-picked URIs (from the "+" FAB) to the existing list. */
     fun onPhotosSelected(uris: List<Uri>) {
-        _uiState.update { it.copy(photos = uris) }
+        _uiState.update { it.copy(photos = (it.photos + uris).distinct()) }
     }
 
     fun onPhotoAddedToOrbit(uri: Uri) {
@@ -94,10 +119,6 @@ class WorkbenchViewModel(
 
     private fun onNfcPeerDetected(handshake: PeerHandshake) {
         _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
-        // Auto-initiate download (zero-click)
-        _uiState.value.let { state ->
-            // context needed — signal for Screen to trigger download
-        }
     }
 
     fun startDownload(handshake: PeerHandshake, context: Context) {
@@ -109,11 +130,7 @@ class WorkbenchViewModel(
         when (state) {
             is TransferState.Complete -> {
                 _uiState.update {
-                    it.copy(
-                        nfcState = NfcUiState.Complete,
-                        transferProgress = 1f,
-                        showRipple = true
-                    )
+                    it.copy(nfcState = NfcUiState.Complete, transferProgress = 1f, showRipple = true)
                 }
             }
             is TransferState.Failed -> {

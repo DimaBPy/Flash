@@ -1,7 +1,11 @@
 package com.example.flash.ui.workbench
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -37,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,7 +56,7 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.collectAsState
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -59,13 +64,17 @@ import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
 import com.example.flash.R
 import com.example.flash.nfc.NfcManager
-import com.example.flash.nfc.PeerHandshake
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.backdrops.layerBackdrop
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,44 +96,66 @@ fun WorkbenchScreen(
 
     val uiState by viewModel.uiState.collectAsState()
 
-    // Auto-trigger download when peer is detected (zero-click)
+    // ── Permission + auto-load ────────────────────────────────────────────────
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) viewModel.loadGalleryPhotos(context)
+    }
+    LaunchedEffect(Unit) {
+        val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        else
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        val allGranted = needed.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) viewModel.loadGalleryPhotos(context) else permissionLauncher.launch(needed)
+    }
+
+    // ── Zero-click NFC download ───────────────────────────────────────────────
     LaunchedEffect(uiState.nfcState) {
         val state = uiState.nfcState
-        if (state is NfcUiState.PeerDetected) {
-            viewModel.startDownload(state.handshake, context)
-        }
+        if (state is NfcUiState.PeerDetected) viewModel.startDownload(state.handshake, context)
     }
 
-    var coreCenter by remember { mutableStateOf(Offset.Zero) }
+    var coreCenter  by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
 
-    val photoPicker = rememberPhotoPicker { uris ->
-        viewModel.onPhotosSelected(uris)
-    }
+    val photoPicker = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
+
+    // ── Backdrop for the glass tray ───────────────────────────────────────────
+    val screenBackdrop = rememberLayerBackdrop()
+    val surfaceColor   = MaterialTheme.colorScheme.surface
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .layerBackdrop(screenBackdrop)
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
     ) {
         val screenHeight = maxHeight
 
-        // Bottom tray (70% of screen)
+        // ── Glass tray (70 % of screen) ───────────────────────────────────────
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(screenHeight * 0.70f)
-                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(MaterialTheme.colorScheme.surface)
+                .drawBackdrop(
+                    backdrop = screenBackdrop,
+                    shape    = { RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp) },
+                    effects  = { blur(20f); vibrancy() },
+                    onDrawSurface = { drawRect(surfaceColor.copy(alpha = 0.78f)) }
+                )
         ) {
             // Photo grid
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 contentPadding = PaddingValues(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement   = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(screenHeight * 0.57f)
@@ -136,10 +167,8 @@ fun WorkbenchScreen(
                         coreCenter = coreCenter,
                         onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
                         onTap = {
-                            if (uri in uiState.selectedPhotos)
-                                viewModel.onPhotoRemovedFromOrbit(uri)
-                            else
-                                viewModel.onPhotoAddedToOrbit(uri)
+                            if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
+                            else                               viewModel.onPhotoAddedToOrbit(uri)
                         }
                     )
                 }
@@ -163,7 +192,6 @@ fun WorkbenchScreen(
                     .padding(bottom = 72.dp)
             )
 
-            // Liquid exit button
             TextButton(
                 onClick = { viewModel.onExitRequested() },
                 modifier = Modifier
@@ -178,18 +206,17 @@ fun WorkbenchScreen(
             }
         }
 
-        // Mother Core — TopCenter, floats above tray
+        // ── Mother Core ───────────────────────────────────────────────────────
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .onGloballyPositioned { coords ->
                     val pos = coords.positionInParent()
-                    val size = coords.size
-                    coreCenter = Offset(pos.x + size.width / 2f, pos.y + size.height / 2f)
+                    val sz  = coords.size
+                    coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
                 }
         ) {
             MotherCore(
-                modifier = Modifier,
                 progress = uiState.transferProgress,
                 isReceiving = uiState.isReceiving,
                 shouldExit = uiState.shouldExit,
@@ -197,13 +224,13 @@ fun WorkbenchScreen(
             )
         }
 
-        // Orbiting photos
+        // ── Orbiting selected photos ──────────────────────────────────────────
         PhotoOrbit(
             photos = uiState.selectedPhotos.toList(),
             coreCenter = coreCenter
         )
 
-        // Settings icon — TopEnd
+        // ── Settings icon ─────────────────────────────────────────────────────
         IconButton(
             onClick = { showSettings = true },
             modifier = Modifier
@@ -217,7 +244,7 @@ fun WorkbenchScreen(
             )
         }
 
-        // Add photos FAB
+        // ── Add photos FAB (secondary, for manual picking) ────────────────────
         FloatingActionButton(
             onClick = { photoPicker.launch() },
             containerColor = OceanAqua,
@@ -230,7 +257,7 @@ fun WorkbenchScreen(
             Icon(Icons.Default.Add, contentDescription = "Add photos", tint = MaterialTheme.colorScheme.onPrimary)
         }
 
-        // AGSL ripple on transfer complete
+        // ── AGSL ripple on transfer complete ──────────────────────────────────
         if (uiState.showRipple) {
             RippleOverlay(
                 coreCenter = coreCenter,
@@ -239,7 +266,7 @@ fun WorkbenchScreen(
         }
     }
 
-    // Settings bottom sheet
+    // ── Settings sheet ────────────────────────────────────────────────────────
     if (showSettings) {
         val sheetState = rememberModalBottomSheetState()
         ModalBottomSheet(

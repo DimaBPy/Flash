@@ -1,5 +1,7 @@
 package com.example.flash.ui.core
 
+import kotlin.math.floor
+
 object PerlinNoise {
 
     private val permutation = IntArray(256).also { p ->
@@ -38,10 +40,11 @@ object PerlinNoise {
     }
 
     fun noise(x: Double, y: Double): Double {
-        val xi = x.toInt() and 255
-        val yi = y.toInt() and 255
-        val xf = x - x.toInt()
-        val yf = y - y.toInt()
+        val fx = floor(x); val fy = floor(y)
+        val xi = fx.toInt() and 255
+        val yi = fy.toInt() and 255
+        val xf = x - fx
+        val yf = y - fy
 
         val u = fade(xf)
         val v = fade(yf)

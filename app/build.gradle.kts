@@ -94,6 +94,9 @@ dependencies {
     // Persistence
     implementation(libs.datastore.preferences)
 
+    // Liquid Glass
+    implementation(libs.backdrop)
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
