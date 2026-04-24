@@ -51,7 +51,9 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
@@ -76,13 +78,14 @@ fun WorkbenchScreen(
     val app = context.applicationContext as FlashApplication
 
     val viewModel: WorkbenchViewModel = viewModel(
-        factory = androidx.lifecycle.ViewModelProvider.Factory {
+        factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            WorkbenchViewModel(transferRepository, nfcManager) as androidx.lifecycle.ViewModel
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                WorkbenchViewModel(transferRepository, nfcManager) as T
         }
     )
 
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsState()
 
     // Auto-trigger download when peer is detected (zero-click)
     LaunchedEffect(uiState.nfcState) {

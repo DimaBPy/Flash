@@ -8,9 +8,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.rememberNavController
+import com.example.flash.ui.theme.ThemeMode
 import com.example.flash.navigation.NavGraph
 import com.example.flash.navigation.Screen
 import com.example.flash.nfc.NfcManager
@@ -32,8 +33,8 @@ class MainActivity : ComponentActivity() {
         intent?.let { nfcManager.handleIntent(it) }
 
         setContent {
-            val themeMode by app.themeRepository.themeMode.collectAsStateWithLifecycle()
-            val onboardingShown by app.themeRepository.onboardingShown.collectAsStateWithLifecycle()
+            val themeMode by app.themeRepository.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
+            val onboardingShown by app.themeRepository.onboardingShown.collectAsState(initial = false)
             val navController = rememberNavController()
 
             FlashTheme(themeMode = themeMode) {

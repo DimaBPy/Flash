@@ -3,6 +3,7 @@ package com.example.flash.ui.core
 import android.graphics.BlurMaskFilter
 import android.graphics.Paint
 import android.os.Build
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
