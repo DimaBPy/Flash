@@ -30,7 +30,7 @@ jobs:
       - name: Get version name
         id: version
         run: |
-          VERSION=$(./gradlew -q printVersionName 2>/dev/null || echo "1.0")
+          VERSION=$(./gradlew -q printVersionName --no-daemon)
           SHORT_SHA="${GITHUB_SHA::7}"
           echo "tag=v${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "name=Flash v${VERSION} (${SHORT_SHA})" >> $GITHUB_OUTPUT
