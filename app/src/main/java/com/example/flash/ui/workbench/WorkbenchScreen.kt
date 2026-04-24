@@ -6,21 +6,20 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,7 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +52,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -70,11 +70,18 @@ import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
+import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.backdrops.layerBackdrop
+
+// Blob size constants mirrored from MotherCore (keep in sync)
+private const val BLOB_BASE_RADIUS_DP  = 60f
+private const val BLOB_NOISE_OFFSET_DP = 14f
+private const val BLOB_PADDING_DP      = 32f
+private val BLOB_SIZE_DP = (BLOB_BASE_RADIUS_DP * 2 + BLOB_NOISE_OFFSET_DP * 2 + BLOB_PADDING_DP).dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,7 +91,9 @@ fun WorkbenchScreen(
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
-    val app = context.applicationContext as FlashApplication
+    val density = LocalDensity.current
+    val view    = LocalView.current
+    val app     = context.applicationContext as FlashApplication
 
     val viewModel: WorkbenchViewModel = viewModel(
         factory = object : ViewModelProvider.Factory {
@@ -93,10 +102,9 @@ fun WorkbenchScreen(
                 WorkbenchViewModel(transferRepository, nfcManager) as T
         }
     )
-
     val uiState by viewModel.uiState.collectAsState()
 
-    // ── Permission + auto-load ────────────────────────────────────────────────
+    // ── Permission + auto-load camera roll ───────────────────────────────────
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -113,18 +121,41 @@ fun WorkbenchScreen(
         if (allGranted) viewModel.loadGalleryPhotos(context) else permissionLauncher.launch(needed)
     }
 
-    // ── Zero-click NFC download ───────────────────────────────────────────────
+    // ── Zero-click NFC download ──────────────────────────────────────────────
     LaunchedEffect(uiState.nfcState) {
-        val state = uiState.nfcState
-        if (state is NfcUiState.PeerDetected) viewModel.startDownload(state.handshake, context)
+        val s = uiState.nfcState
+        if (s is NfcUiState.PeerDetected) viewModel.startDownload(s.handshake, context)
     }
 
-    var coreCenter  by remember { mutableStateOf(Offset.Zero) }
+    // ── Camera cutout center → blob-local offset ─────────────────────────────
+    // cutoutCenterPx is in window coordinates (includes status bar).
+    // We convert to BoxWithConstraints-local coordinates by subtracting the
+    // status bar height, then subtract the blob's own center so the vector
+    // tells MotherCore "how far to translate to reach the camera hole".
+    val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
+    val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
+
+    val cutoutOffset: Offset = remember(view, statusBarTopPx, blobSizePx) {
+        val cutoutCenterInWindow: Offset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val rect = view.rootWindowInsets?.displayCutout?.boundingRects?.firstOrNull()
+            if (rect != null) Offset(rect.centerX().toFloat(), rect.centerY().toFloat())
+            else Offset(view.width / 2f, statusBarTopPx / 2f)
+        } else {
+            Offset(view.width / 2f, statusBarTopPx / 2f)
+        }
+        // Convert to BoxWithConstraints-local (shift up by status bar) then
+        // subtract blob's own center (TopCenter alignment → blob cx = half screen width)
+        val cutoutLocal = cutoutCenterInWindow - Offset(0f, statusBarTopPx)
+        val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
+        cutoutLocal - blobCenter
+    }
+
+    var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
 
     val photoPicker = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
 
-    // ── Backdrop for the glass tray ───────────────────────────────────────────
+    // ── Backdrop for glass effects ───────────────────────────────────────────
     val screenBackdrop = rememberLayerBackdrop()
     val surfaceColor   = MaterialTheme.colorScheme.surface
 
@@ -137,7 +168,7 @@ fun WorkbenchScreen(
     ) {
         val screenHeight = maxHeight
 
-        // ── Glass tray (70 % of screen) ───────────────────────────────────────
+        // ── Glass tray ───────────────────────────────────────────────────────
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -150,7 +181,6 @@ fun WorkbenchScreen(
                     onDrawSurface = { drawRect(surfaceColor.copy(alpha = 0.78f)) }
                 )
         ) {
-            // Photo grid
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 contentPadding = PaddingValues(8.dp),
@@ -162,9 +192,9 @@ fun WorkbenchScreen(
             ) {
                 items(uiState.photos) { uri ->
                     PhotoGridItem(
-                        uri = uri,
-                        isInOrbit = uri in uiState.selectedPhotos,
-                        coreCenter = coreCenter,
+                        uri          = uri,
+                        isInOrbit    = uri in uiState.selectedPhotos,
+                        coreCenter   = coreCenter,
                         onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
                         onTap = {
                             if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
@@ -176,37 +206,48 @@ fun WorkbenchScreen(
 
             // Status text
             val statusText = when (val s = uiState.nfcState) {
-                is NfcUiState.Idle        -> stringResource(R.string.transfer_waiting)
-                is NfcUiState.Advertising -> stringResource(R.string.transfer_connecting)
-                is NfcUiState.Transferring -> stringResource(R.string.transfer_progress, (uiState.transferProgress * 100).toInt())
-                is NfcUiState.Complete    -> stringResource(R.string.transfer_complete)
-                is NfcUiState.Error       -> s.message
+                is NfcUiState.Idle         -> stringResource(R.string.transfer_waiting)
+                is NfcUiState.Advertising  -> stringResource(R.string.transfer_connecting)
+                is NfcUiState.Transferring -> stringResource(
+                    R.string.transfer_progress, (uiState.transferProgress * 100).toInt()
+                )
+                is NfcUiState.Complete     -> stringResource(R.string.transfer_complete)
+                is NfcUiState.Error        -> s.message
                 else -> ""
             }
             Text(
-                text = statusText,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                text     = statusText,
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 72.dp)
             )
 
-            TextButton(
-                onClick = { viewModel.onExitRequested() },
+            // ── Liquid Glass exit pill ────────────────────────────────────────
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 16.dp)
+                    .drawBackdrop(
+                        backdrop = screenBackdrop,
+                        shape    = { RoundedCornerShape(50) },
+                        effects  = { blur(10f); vibrancy(); lens(6f, 10f) },
+                        onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.15f)) }
+                    )
+                    .clickable { viewModel.onExitRequested() }
+                    .padding(horizontal = 32.dp, vertical = 12.dp)
             ) {
                 Text(
-                    text = stringResource(R.string.exit_button),
+                    text  = stringResource(R.string.exit_button),
                     color = OceanAqua,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
         }
 
-        // ── Mother Core ───────────────────────────────────────────────────────
+        // ── Mother Core — spawn/exit morphs through the camera cutout ────────
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -217,47 +258,49 @@ fun WorkbenchScreen(
                 }
         ) {
             MotherCore(
-                progress = uiState.transferProgress,
+                progress    = uiState.transferProgress,
                 isReceiving = uiState.isReceiving,
-                shouldExit = uiState.shouldExit,
+                shouldExit  = uiState.shouldExit,
+                cutoutOffset = cutoutOffset,
                 onAnimationComplete = { (context as? android.app.Activity)?.finish() }
             )
         }
 
-        // ── Orbiting selected photos ──────────────────────────────────────────
+        // ── Orbiting selected photos ─────────────────────────────────────────
         PhotoOrbit(
-            photos = uiState.selectedPhotos.toList(),
+            photos     = uiState.selectedPhotos.toList(),
             coreCenter = coreCenter
         )
 
-        // ── Settings icon ─────────────────────────────────────────────────────
+        // ── Settings icon ────────────────────────────────────────────────────
         IconButton(
-            onClick = { showSettings = true },
+            onClick  = { showSettings = true },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(16.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Settings,
+                imageVector        = Icons.Default.Settings,
                 contentDescription = stringResource(R.string.cd_settings),
-                tint = MaterialTheme.colorScheme.onBackground
+                tint               = MaterialTheme.colorScheme.onBackground
             )
         }
 
-        // ── Add photos FAB (secondary, for manual picking) ────────────────────
+        // ── "+" FAB — secondary, for manual picks ────────────────────────────
         FloatingActionButton(
-            onClick = { photoPicker.launch() },
+            onClick        = { photoPicker.launch() },
             containerColor = OceanAqua,
-            shape = CircleShape,
-            modifier = Modifier
+            shape          = CircleShape,
+            modifier       = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(24.dp)
                 .offset(y = (-56).dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add photos", tint = MaterialTheme.colorScheme.onPrimary)
+            Icon(Icons.Default.Add, contentDescription = "Add photos",
+                tint = MaterialTheme.colorScheme.onPrimary)
         }
 
-        // ── AGSL ripple on transfer complete ──────────────────────────────────
+        // ── AGSL ripple on transfer complete ─────────────────────────────────
         if (uiState.showRipple) {
             RippleOverlay(
                 coreCenter = coreCenter,
@@ -271,11 +314,11 @@ fun WorkbenchScreen(
         val sheetState = rememberModalBottomSheetState()
         ModalBottomSheet(
             onDismissRequest = { showSettings = false },
-            sheetState = sheetState
+            sheetState       = sheetState
         ) {
             SettingsScreen(
                 themeRepository = app.themeRepository,
-                onBack = { showSettings = false }
+                onBack          = { showSettings = false }
             )
         }
     }
@@ -295,22 +338,20 @@ private fun PhotoGridItem(
             .clip(RoundedCornerShape(12.dp))
             .clickable { onTap() }
             .breakawayDrag(
-                coreCenter = coreCenter,
+                coreCenter   = coreCenter,
                 onDragToCore = { _ -> onDragToCore() }
             )
     ) {
         AsyncImage(
-            model = uri,
+            model              = uri,
             contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
+            contentScale       = ContentScale.Crop,
+            modifier           = Modifier.fillMaxSize()
         )
         if (isInOrbit) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(OceanAqua.copy(alpha = 0.35f))
-            )
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .background(OceanAqua.copy(alpha = 0.35f)))
         }
     }
 }
