@@ -21,18 +21,6 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # Bumping to 8.10 to perfectly support AGP 8.7.0 and SDK 36
-      - name: Update Gradle Wrapper to 8.10
-        run: |
-          gradle wrapper --gradle-version 8.10
-
-      # Pushes the 8.10 files back to your repo so it's fixed forever
-      - name: Commit and Push Wrapper Update
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Auto-fix: Updated Gradle Wrapper to 8.10 via system gradle"
-          file_pattern: 'gradlew gradlew.bat gradle/*'
-
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 

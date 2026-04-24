@@ -7,13 +7,12 @@ plugins {
 
 android {
     namespace = "com.example.flash"
-    // Bumping to 36 to satisfy the Backdrop and Shapes library requirements
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.flash"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -59,9 +58,6 @@ dependencies {
 
     // Material3 (pinned alpha — outside BOM)
     implementation(libs.compose.material3)
-
-    // Liquid Glass SDF
-    implementation(libs.backdrop.liquid)
 
     // Navigation
     implementation(libs.navigation.compose)
