@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -153,6 +154,11 @@ fun WorkbenchScreen(
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
 
+    // Block the exit button for 600 ms after the screen loads so a touch-up
+    // event from the onboarding "Got it" button can't pass through to it.
+    var exitEnabled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
+
     val photoPicker = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
 
     // ── Backdrop for glass effects ───────────────────────────────────────────
@@ -236,7 +242,7 @@ fun WorkbenchScreen(
                         effects  = { blur(10f); vibrancy(); lens(6f, 10f) },
                         onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.15f)) }
                     )
-                    .clickable { viewModel.onExitRequested() }
+                    .clickable(enabled = exitEnabled) { viewModel.onExitRequested() }
                     .padding(horizontal = 32.dp, vertical = 12.dp)
             ) {
                 Text(
