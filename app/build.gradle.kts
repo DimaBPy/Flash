@@ -99,6 +99,7 @@ dependencies {
 
     // Liquid Glass
     implementation(libs.backdrop)
+    implementation(libs.kyant.shapes)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
