@@ -71,6 +71,13 @@ import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.shapes.Capsule
 
 // Blob size constants mirrored from MotherCore (keep in sync)
 private const val BLOB_BASE_RADIUS_DP  = 60f
@@ -156,10 +163,12 @@ fun WorkbenchScreen(
     val photoPicker = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
 
     val surfaceColor = MaterialTheme.colorScheme.surface
+    val screenBackdrop = rememberLayerBackdrop()
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .layerBackdrop(screenBackdrop)
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
     ) {
@@ -217,23 +226,15 @@ fun WorkbenchScreen(
                     .padding(bottom = 72.dp)
             )
 
-            // ── Exit pill ────────────────────────────────────────────────────
-            Box(
-                contentAlignment = Alignment.Center,
+            // ── Liquid Glass exit button ────────────────────────────────────
+            LiquidExitButton(
+                onClick  = { viewModel.onExitRequested() },
+                backdrop = screenBackdrop,
+                enabled  = exitEnabled,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 16.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(OceanAqua.copy(alpha = 0.15f))
-                    .clickable(enabled = exitEnabled) { viewModel.onExitRequested() }
-                    .padding(horizontal = 32.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text  = stringResource(R.string.exit_button),
-                    color = OceanAqua,
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
+            )
         }
 
         // ── Mother Core — spawn/exit morphs through the camera cutout ────────
@@ -342,5 +343,32 @@ private fun PhotoGridItem(
                 .fillMaxSize()
                 .background(OceanAqua.copy(alpha = 0.35f)))
         }
+    }
+}
+
+@Composable
+private fun LiquidExitButton(
+    onClick: () -> Unit,
+    backdrop: com.kyant.backdrop.backdrops.Backdrop,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape    = { Capsule() },
+                effects  = { blur(2f); vibrancy(); lens(12f, 24f) },
+                onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.15f)) }
+            )
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 32.dp, vertical = 12.dp)
+    ) {
+        Text(
+            text  = stringResource(R.string.exit_button),
+            color = OceanAqua,
+            style = MaterialTheme.typography.titleMedium
+        )
     }
 }
