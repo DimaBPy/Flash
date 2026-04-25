@@ -97,10 +97,34 @@ class WorkbenchViewModel(
 
     fun onPhotoAddedToOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        // When photos are added to orbit, prepare for sending
+        prepareSenderHandshake(uri)
     }
 
     fun onPhotoRemovedFromOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos - uri) }
+        if (_uiState.value.selectedPhotos.isEmpty()) {
+            nfcManager.clearOutboundHandshake()
+        }
+    }
+
+    private fun prepareSenderHandshake(uri: Uri) {
+        currentToken = UUID.randomUUID().toString()
+        viewModelScope.launch {
+            try {
+                // FlashApplication.instance might be null if not initialized, 
+                // but we are in a ViewModel so it's fine.
+                val context = com.example.flash.FlashApplication.instance
+                val localIp = transferRepository.getLocalIp(context)
+                val port = transferRepository.startServing(currentToken, uri, context)
+                nfcManager.setOutboundHandshake(localIp, port, currentToken, "en")
+                _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun onNdefHandshakeReceived(message: android.nfc.NdefMessage) {
+        nfcManager.handleNdefMessage(message)
     }
 
     fun onPhotoDraggedToCore(uri: Uri, context: Context) {
@@ -118,7 +142,11 @@ class WorkbenchViewModel(
     }
 
     private fun onNfcPeerDetected(handshake: PeerHandshake) {
-        _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
+        // If we are currently in sender mode (have selected photos), 
+        // we might ignore incoming handshakes to avoid cross-talk.
+        if (_uiState.value.selectedPhotos.isEmpty()) {
+            _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
+        }
     }
 
     fun startDownload(handshake: PeerHandshake, context: Context) {
