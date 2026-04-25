@@ -65,7 +65,7 @@ fun MotherCore(
     val time by infiniteTransition.animateFloat(
         initialValue  = 0f,
         targetValue   = 1000f,
-        animationSpec = infiniteRepeatable(tween(1_000_000, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(tween(8_000, easing = LinearEasing)),
         label         = "time"
     )
 
