@@ -17,10 +17,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -59,7 +62,7 @@ fun PhotoOrbit(
         label = "orbit_time"
     )
 
-    // Slow blob morph clock — different speed so edges feel alive independently
+    // Slow blob morph clock
     val blobTime by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = 1000f,
@@ -69,7 +72,7 @@ fun PhotoOrbit(
         label = "blob_time"
     )
 
-    // Low-frequency radial drift  ±8 dp
+    // Low-frequency radial drift
     val radialDrift by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = with(density) { 8.dp.toPx() },
@@ -89,16 +92,10 @@ fun PhotoOrbit(
             val phaseOffset = (index.toFloat() / photos.size) * (2 * PI).toFloat()
             val orbitR = baseOrbitRadiusPx + radialDrift
 
-            // Elliptical trajectory (x/y use different angular speeds)
             val x = coreCenter.x + orbitR * cos(time + phaseOffset)
             val y = coreCenter.y + orbitR * sin((time * 0.6f) + phaseOffset)
 
-            // Each photo gets its own phase in the blob clock so edges differ
-            val photoBlob = blobTime + index * 137f  // 137 ≈ golden-angle offset
-
-            val blobShape = remember(photoBlob) {
-                BlobPhotoShape(photoBlob.toDouble(), index)
-            }
+            val photoBlobTime = (blobTime + index * 137f).toDouble()
 
             AsyncImage(
                 model = uri,
@@ -106,35 +103,31 @@ fun PhotoOrbit(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(photoSizeDp)
-                    .graphicsLayer(
-                        shape = blobShape,
-                        clip  = true,
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    )
                     .offset {
                         IntOffset(
-                            x = (x - photoSizePx / 2f).roundToInt(),
-                            y = (y - photoSizePx / 2f).roundToInt()
+                            (x - photoSizePx / 2f).roundToInt(),
+                            (y - photoSizePx / 2f).roundToInt()
                         )
+                    }
+                    .drawWithCache {
+                        val path = Path()
+                        onDrawWithContent {
+                            // Reduced complexity for orbiting items: 1 octave instead of 3
+                            com.example.flash.ui.core.updateBlobPath(
+                                path     = path,
+                                cx       = size.width  / 2f,
+                                cy       = size.height / 2f,
+                                baseR    = minOf(size.width, size.height) / 2f - 3.dp.toPx(),
+                                noiseAmp = 5.dp.toPx(),
+                                time     = photoBlobTime,
+                                octaves  = 1
+                            )
+                            clipPath(path) {
+                                this@onDrawWithContent.drawContent()
+                            }
+                        }
                     }
             )
         }
-    }
-}
-
-/** A [Shape] whose outline is a Perlin-noise blob — re-created each time [blobTime] changes. */
-private class BlobPhotoShape(
-    private val blobTime: Double,
-    private val seed: Int
-) : Shape {
-    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val path = buildBlobPath(
-            cx       = size.width  / 2f,
-            cy       = size.height / 2f,
-            baseR    = minOf(size.width, size.height) / 2f - with(density) { 3.dp.toPx() },
-            noiseAmp = with(density) { 5.dp.toPx() },
-            time     = blobTime + seed * 137.0
-        )
-        return Outline.Generic(path)
     }
 }

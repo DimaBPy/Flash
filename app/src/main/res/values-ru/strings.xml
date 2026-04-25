@@ -18,4 +18,6 @@
     <string name="exit_button">Выход</string>
     <string name="cd_settings">Настройки</string>
     <string name="cd_core">Главное ядро</string>
+    <string name="hce_service_desc">Служба рукопожатия Flash</string>
+    <string name="hce_aid_group_desc">NFC рукопожатие Flash</string>
 </resources>

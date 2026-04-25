@@ -107,6 +107,22 @@ fun WorkbenchScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
 
+    // ── Dynamic NFC Sensor Management ───────────────────────────────────────
+    // Logic: If photos selected -> Sender (disable reader). 
+    //        If no photos selected -> Receiver (enable reader).
+    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
+        val act = context as? android.app.Activity ?: return@LaunchedEffect
+        if (uiState.selectedPhotos.isEmpty()) {
+            // No photos selected: act as a receiver (Reader Mode)
+            nfcManager.enableReaderMode(act) { ndef ->
+                viewModel.onNdefHandshakeReceived(ndef)
+            }
+        } else {
+            // Photos selected: act as a sender (Stop reader, HCE will take over if configured)
+            nfcManager.disableReaderMode(act)
+        }
+    }
+
     // ── Permission + auto-load camera roll ───────────────────────────────────
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -169,7 +185,6 @@ fun WorkbenchScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .layerBackdrop(screenBackdrop)
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
     ) {
@@ -357,12 +372,8 @@ private fun LiquidExitButton(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape    = { Capsule() },
-                effects  = { blur(2f); vibrancy(); lens(12f, 24f) },
-                onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.15f)) }
-            )
+            .clip(Capsule())
+            .background(OceanAqua.copy(alpha = 0.15f))
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = 32.dp, vertical = 12.dp)
     ) {
