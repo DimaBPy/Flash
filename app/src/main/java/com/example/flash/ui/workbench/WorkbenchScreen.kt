@@ -71,12 +71,6 @@ import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
 
 // Blob size constants mirrored from MotherCore (keep in sync)
 private const val BLOB_BASE_RADIUS_DP  = 60f
@@ -161,14 +155,11 @@ fun WorkbenchScreen(
 
     val photoPicker = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
 
-    // ── Backdrop for glass effects ───────────────────────────────────────────
-    val screenBackdrop = rememberLayerBackdrop()
-    val surfaceColor   = MaterialTheme.colorScheme.surface
+    val surfaceColor = MaterialTheme.colorScheme.surface
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .layerBackdrop(screenBackdrop)
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
     ) {
@@ -180,12 +171,8 @@ fun WorkbenchScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(screenHeight * 0.70f)
-                .drawBackdrop(
-                    backdrop = screenBackdrop,
-                    shape    = { RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp) },
-                    effects  = { blur(20f); vibrancy() },
-                    onDrawSurface = { drawRect(surfaceColor.copy(alpha = 0.78f)) }
-                )
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(surfaceColor.copy(alpha = 0.92f))
         ) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
@@ -230,18 +217,14 @@ fun WorkbenchScreen(
                     .padding(bottom = 72.dp)
             )
 
-            // ── Liquid Glass exit pill ────────────────────────────────────────
+            // ── Exit pill ────────────────────────────────────────────────────
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 16.dp)
-                    .drawBackdrop(
-                        backdrop = screenBackdrop,
-                        shape    = { RoundedCornerShape(50) },
-                        effects  = { blur(10f); vibrancy(); lens(6f, 10f) },
-                        onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.15f)) }
-                    )
+                    .clip(RoundedCornerShape(50))
+                    .background(OceanAqua.copy(alpha = 0.15f))
                     .clickable(enabled = exitEnabled) { viewModel.onExitRequested() }
                     .padding(horizontal = 32.dp, vertical = 12.dp)
             ) {
