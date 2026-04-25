@@ -71,7 +71,6 @@ import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
-import com.kyant.backdrop.materials.LiquidButton
 
 // Blob size constants mirrored from MotherCore (keep in sync)
 private const val BLOB_BASE_RADIUS_DP  = 60f
@@ -218,12 +217,16 @@ fun WorkbenchScreen(
                     .padding(bottom = 72.dp)
             )
 
-            // ── Liquid Glass exit button ────────────────────────────────────
-            LiquidButton(
-                onClick  = { if (exitEnabled) viewModel.onExitRequested() },
+            // ── Exit pill ────────────────────────────────────────────────────
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 16.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(OceanAqua.copy(alpha = 0.15f))
+                    .clickable(enabled = exitEnabled) { viewModel.onExitRequested() }
+                    .padding(horizontal = 32.dp, vertical = 12.dp)
             ) {
                 Text(
                     text  = stringResource(R.string.exit_button),
