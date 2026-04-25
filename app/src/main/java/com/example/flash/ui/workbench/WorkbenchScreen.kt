@@ -77,7 +77,8 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.shapes.Capsule
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.shapes.Capsule
 
 // Blob size constants mirrored from MotherCore (keep in sync)
 private const val BLOB_BASE_RADIUS_DP  = 60f
@@ -349,7 +350,7 @@ private fun PhotoGridItem(
 @Composable
 private fun LiquidExitButton(
     onClick: () -> Unit,
-    backdrop: com.kyant.backdrop.backdrops.Backdrop,
+    backdrop: LayerBackdrop,
     enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
