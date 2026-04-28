@@ -11,14 +11,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -133,21 +131,25 @@ fun WorkbenchScreen(
         if (s is NfcUiState.PeerDetected) viewModel.startDownload(s.handshake, context)
     }
 
-    // ── Camera cutout center → blob-local offset ─────────────────────────────
-    val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
-    val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
-
-    val cutoutOffset: Offset = remember(view, statusBarTopPx, blobSizePx) {
-        val cutoutCenterInWindow: Offset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val rect = view.rootWindowInsets?.displayCutout?.boundingRects?.firstOrNull()
-            if (rect != null) Offset(rect.centerX().toFloat(), rect.centerY().toFloat())
-            else Offset(view.width / 2f, statusBarTopPx / 2f)
-        } else {
-            Offset(view.width / 2f, statusBarTopPx / 2f)
+    // ── Camera cutout offset: punch-hole is at screen center, ~80dp from top ─
+    // X is forced to center (confirmed by device owner). Y = 80dp in window
+    // coords. We subtract statusBar to get content-area coords, then subtract
+    // the blob's own center to get the spawn/exit translation vector.
+    val cutoutOffset: Offset = with(density) {
+        remember(view, density) {
+            val cutoutX = view.width / 2f
+            val cutoutY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                view.rootWindowInsets?.displayCutout?.boundingRects
+                    ?.firstOrNull()?.centerY()?.toFloat() ?: 80.dp.toPx()
+            } else {
+                80.dp.toPx()
+            }
+            val statusBarPx = view.rootWindowInsets?.systemWindowInsetTop?.toFloat() ?: 0f
+            val blobSizePx  = BLOB_SIZE_DP.toPx()
+            val cutoutLocal = Offset(cutoutX, cutoutY) - Offset(0f, statusBarPx)
+            val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
+            cutoutLocal - blobCenter
         }
-        val cutoutLocal = cutoutCenterInWindow - Offset(0f, statusBarTopPx)
-        val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
-        cutoutLocal - blobCenter
     }
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
@@ -160,6 +162,18 @@ fun WorkbenchScreen(
     val photoPicker  = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
     val exitBackdrop = rememberLayerBackdrop()
     val surfaceColor = MaterialTheme.colorScheme.surface
+
+    // Status text computed here so it can be placed outside the tray
+    val statusText = when (val s = uiState.nfcState) {
+        is NfcUiState.Idle         -> stringResource(R.string.transfer_waiting)
+        is NfcUiState.Advertising  -> stringResource(R.string.transfer_connecting)
+        is NfcUiState.Transferring -> stringResource(
+            R.string.transfer_progress, (uiState.transferProgress * 100).toInt()
+        )
+        is NfcUiState.Complete     -> stringResource(R.string.transfer_complete)
+        is NfcUiState.Error        -> s.message
+        else -> ""
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -178,64 +192,62 @@ fun WorkbenchScreen(
                 .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
                 .background(surfaceColor.copy(alpha = 0.92f))
         ) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement   = Arrangement.spacedBy(4.dp),
+            // Photo grid with LiquidButton floating over it
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(screenHeight * 0.57f)
             ) {
-                items(uiState.photos) { uri ->
-                    PhotoGridItem(
-                        uri          = uri,
-                        isInOrbit    = uri in uiState.selectedPhotos,
-                        coreCenter   = coreCenter,
-                        onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
-                        onTap = {
-                            if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
-                            else                               viewModel.onPhotoAddedToOrbit(uri)
-                        }
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement   = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(uiState.photos) { uri ->
+                        PhotoGridItem(
+                            uri          = uri,
+                            isInOrbit    = uri in uiState.selectedPhotos,
+                            coreCenter   = coreCenter,
+                            onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
+                            onTap = {
+                                if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
+                                else                               viewModel.onPhotoAddedToOrbit(uri)
+                            }
+                        )
+                    }
+                }
+
+                // ── Liquid Glass exit button — floats over photos ─────────────
+                LiquidButton(
+                    onClick      = { viewModel.onExitRequested() },
+                    backdrop     = exitBackdrop,
+                    enabled      = exitEnabled,
+                    surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                    modifier     = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                ) {
+                    Text(
+                        text  = stringResource(R.string.exit_button),
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
                     )
                 }
             }
+        }
 
-            val statusText = when (val s = uiState.nfcState) {
-                is NfcUiState.Idle         -> stringResource(R.string.transfer_waiting)
-                is NfcUiState.Advertising  -> stringResource(R.string.transfer_connecting)
-                is NfcUiState.Transferring -> stringResource(
-                    R.string.transfer_progress, (uiState.transferProgress * 100).toInt()
-                )
-                is NfcUiState.Complete     -> stringResource(R.string.transfer_complete)
-                is NfcUiState.Error        -> s.message
-                else -> ""
-            }
+        // ── Status text — between blob and tray ──────────────────────────────
+        if (statusText.isNotEmpty()) {
             Text(
                 text     = statusText,
                 style    = MaterialTheme.typography.bodyMedium,
-                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color    = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 72.dp)
+                    .align(Alignment.TopCenter)
+                    .padding(top = BLOB_SIZE_DP + 4.dp)
             )
-
-            // ── Liquid Glass exit button ──────────────────────────────────────
-            LiquidButton(
-                onClick   = { viewModel.onExitRequested() },
-                backdrop  = exitBackdrop,
-                enabled   = exitEnabled,
-                tint      = OceanAqua,
-                modifier  = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp)
-            ) {
-                Text(
-                    text  = stringResource(R.string.exit_button),
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
         }
 
         // ── Mother Core — spawn/exit morphs through the camera cutout ────────
