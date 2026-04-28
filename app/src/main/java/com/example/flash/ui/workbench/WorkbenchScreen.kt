@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -200,7 +201,6 @@ fun WorkbenchScreen(
                 }
             }
 
-            // Status text
             val statusText = when (val s = uiState.nfcState) {
                 is NfcUiState.Idle         -> stringResource(R.string.transfer_waiting)
                 is NfcUiState.Advertising  -> stringResource(R.string.transfer_connecting)
@@ -232,7 +232,7 @@ fun WorkbenchScreen(
             ) {
                 Text(
                     text  = stringResource(R.string.exit_button),
-                    color = OceanAqua,
+                    color = Color.White,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
