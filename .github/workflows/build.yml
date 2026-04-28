@@ -2,9 +2,7 @@ name: Build & Release APK
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 jobs:
   build:
@@ -31,7 +29,6 @@ jobs:
 
       - name: Get version name
         id: version
-        if: github.event_name == 'push'
         run: |
           VERSION=$(./gradlew -q printVersionName --no-daemon)
           SHORT_SHA="${GITHUB_SHA::7}"
@@ -39,7 +36,6 @@ jobs:
           echo "name=Flash v${VERSION} (${SHORT_SHA})" >> $GITHUB_OUTPUT
 
       - name: Create Release & upload APK
-        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -49,4 +45,4 @@ jobs:
 
             **Install:** enable *Install unknown apps* on your device, download the APK below and open it.
           files: app/build/outputs/apk/debug/app-debug.apk
-          make_latest: ${{ github.ref == 'refs/heads/main' }}
+          make_latest: true
