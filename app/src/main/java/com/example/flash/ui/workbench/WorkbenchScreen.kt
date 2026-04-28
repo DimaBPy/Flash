@@ -7,7 +7,6 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,12 +38,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
@@ -71,14 +69,8 @@ import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
-import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.shapes.Capsule
+import kotlinx.coroutines.delay
 
 // Blob size constants mirrored from MotherCore (keep in sync)
 private const val BLOB_BASE_RADIUS_DP  = 60f
@@ -105,20 +97,14 @@ fun WorkbenchScreen(
                 WorkbenchViewModel(transferRepository, nfcManager) as T
         }
     )
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // ── Dynamic NFC Sensor Management ───────────────────────────────────────
-    // Logic: If photos selected -> Sender (disable reader). 
-    //        If no photos selected -> Receiver (enable reader).
+    // ── Dynamic NFC mode: receiver when idle, sender (HCE) when photos selected ─
     LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         if (uiState.selectedPhotos.isEmpty()) {
-            // No photos selected: act as a receiver (Reader Mode)
-            nfcManager.enableReaderMode(act) { ndef ->
-                viewModel.onNdefHandshakeReceived(ndef)
-            }
+            nfcManager.enableReaderMode(act) { ndef -> viewModel.onNdefHandshakeReceived(ndef) }
         } else {
-            // Photos selected: act as a sender (Stop reader, HCE will take over if configured)
             nfcManager.disableReaderMode(act)
         }
     }
@@ -147,10 +133,6 @@ fun WorkbenchScreen(
     }
 
     // ── Camera cutout center → blob-local offset ─────────────────────────────
-    // cutoutCenterPx is in window coordinates (includes status bar).
-    // We convert to BoxWithConstraints-local coordinates by subtracting the
-    // status bar height, then subtract the blob's own center so the vector
-    // tells MotherCore "how far to translate to reach the camera hole".
     val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
     val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
 
@@ -162,8 +144,6 @@ fun WorkbenchScreen(
         } else {
             Offset(view.width / 2f, statusBarTopPx / 2f)
         }
-        // Convert to BoxWithConstraints-local (shift up by status bar) then
-        // subtract blob's own center (TopCenter alignment → blob cx = half screen width)
         val cutoutLocal = cutoutCenterInWindow - Offset(0f, statusBarTopPx)
         val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
         cutoutLocal - blobCenter
@@ -172,15 +152,13 @@ fun WorkbenchScreen(
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
 
-    // Block the exit button for 600 ms after the screen loads so a touch-up
-    // event from the onboarding "Got it" button can't pass through to it.
+    // Block exit button for 600ms so onboarding touch-up can't pass through
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
-    val photoPicker = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
-
+    val photoPicker  = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
+    val exitBackdrop = rememberLayerBackdrop()
     val surfaceColor = MaterialTheme.colorScheme.surface
-    val screenBackdrop = rememberLayerBackdrop()
 
     BoxWithConstraints(
         modifier = Modifier
@@ -242,15 +220,22 @@ fun WorkbenchScreen(
                     .padding(bottom = 72.dp)
             )
 
-            // ── Liquid Glass exit button ────────────────────────────────────
-            LiquidExitButton(
-                onClick  = { viewModel.onExitRequested() },
-                backdrop = screenBackdrop,
-                enabled  = exitEnabled,
-                modifier = Modifier
+            // ── Liquid Glass exit button ──────────────────────────────────────
+            LiquidButton(
+                onClick   = { viewModel.onExitRequested() },
+                backdrop  = exitBackdrop,
+                enabled   = exitEnabled,
+                tint      = OceanAqua,
+                modifier  = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 16.dp)
-            )
+            ) {
+                Text(
+                    text  = stringResource(R.string.exit_button),
+                    color = OceanAqua,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
         }
 
         // ── Mother Core — spawn/exit morphs through the camera cutout ────────
@@ -264,9 +249,9 @@ fun WorkbenchScreen(
                 }
         ) {
             MotherCore(
-                progress    = uiState.transferProgress,
-                isReceiving = uiState.isReceiving,
-                shouldExit  = uiState.shouldExit,
+                progress     = uiState.transferProgress,
+                isReceiving  = uiState.isReceiving,
+                shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
                 onAnimationComplete = { (context as? android.app.Activity)?.finish() }
             )
@@ -342,7 +327,6 @@ private fun PhotoGridItem(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(12.dp))
-            .clickable { onTap() }
             .breakawayDrag(
                 coreCenter   = coreCenter,
                 onDragToCore = { _ -> onDragToCore() }
@@ -359,28 +343,5 @@ private fun PhotoGridItem(
                 .fillMaxSize()
                 .background(OceanAqua.copy(alpha = 0.35f)))
         }
-    }
-}
-
-@Composable
-private fun LiquidExitButton(
-    onClick: () -> Unit,
-    backdrop: LayerBackdrop,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .clip(Capsule())
-            .background(OceanAqua.copy(alpha = 0.15f))
-            .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 32.dp, vertical = 12.dp)
-    ) {
-        Text(
-            text  = stringResource(R.string.exit_button),
-            color = OceanAqua,
-            style = MaterialTheme.typography.titleMedium
-        )
     }
 }
