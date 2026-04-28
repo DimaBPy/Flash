@@ -97,6 +97,10 @@ dependencies {
     // Persistence
     implementation(libs.datastore.preferences)
 
+    // Logging
+    implementation(libs.slf4jApi)
+    implementation(libs.logbackAndroid)
+
     // Liquid Glass
     implementation(libs.backdrop)
     implementation(libs.kyant.shapes)

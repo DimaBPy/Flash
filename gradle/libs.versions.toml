@@ -1,5 +1,5 @@
 [versions]
-agp = "8.8.0"
+agp = "8.13.2"
 kotlin = "2.3.0"
 composeBom = "2024.12.01"
 material3 = "1.4.0-alpha11"
@@ -12,9 +12,11 @@ datastore = "1.1.2"
 coroutines = "1.9.0"
 appcompat = "1.7.0"
 coreKtx = "1.15.0"
+slf4j = "2.0.16"
+logbackAndroid = "3.0.0"
 junit = "4.13.2"
 coroutinesTest = "1.9.0"
-backdrop = "2.0.0-alpha03"
+backdrop = "1.0.6"
 kyantShapes = "1.2.0"
 
 [libraries]
@@ -41,6 +43,8 @@ ktor-serialization-json = { group = "io.ktor", name = "ktor-serialization-kotlin
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+slf4jApi = { group = "org.slf4j", name = "slf4j-api", version.ref = "slf4j" }
+logbackAndroid = { group = "com.github.tony19", name = "logback-android", version.ref = "logbackAndroid" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesTest" }
 backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }

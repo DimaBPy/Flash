@@ -47,9 +47,38 @@ class NfcManager(private val context: Context) {
             put("lang", lang)
         }.toString()
 
-        outboundMessage = NdefMessage(
+        val msg = NdefMessage(
             NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
         )
+        outboundMessage = msg
+        // Update the HCE service data
+        HandshakeHceService.ndefMessageBytes = msg.toByteArray()
+    }
+
+    fun clearOutboundHandshake() {
+        outboundMessage = null
+        HandshakeHceService.ndefMessageBytes = null
+    }
+
+    fun enableReaderMode(act: Activity, callback: (NdefMessage) -> Unit) {
+        val flags = NfcAdapter.FLAG_READER_NFC_A or
+                    NfcAdapter.FLAG_READER_NFC_B or
+                    NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
+        adapter?.enableReaderMode(act, { tag ->
+            val ndef = Ndef.get(tag)
+            if (ndef != null) {
+                try {
+                    ndef.connect()
+                    val msg = ndef.ndefMessage
+                    if (msg != null) callback(msg)
+                    ndef.close()
+                } catch (_: Exception) { }
+            }
+        }, flags, null)
+    }
+
+    fun disableReaderMode(act: Activity) {
+        adapter?.disableReaderMode(act)
     }
 
     fun enableForegroundDispatch(
@@ -95,6 +124,10 @@ class NfcManager(private val context: Context) {
 
         // Write our outbound message to the tag if we have one
         tag?.let { writeOutboundToTag(it) }
+    }
+
+    fun handleNdefMessage(message: NdefMessage) {
+        parseAndEmit(message)
     }
 
     private fun readTagAndEmit(tag: Tag) {

@@ -51,25 +51,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                PendingIntent.FLAG_MUTABLE
-            else
-                0
-        )
-        val filters = arrayOf(
-            IntentFilter(android.nfc.NfcAdapter.ACTION_NDEF_DISCOVERED).apply {
-                try { addDataType("application/vnd.flash.handshake") } catch (_: Exception) {}
-            }
-        )
-        nfcManager.enableForegroundDispatch(this, pendingIntent, filters)
+        // We'll manage NFC modes dynamically based on UI state now.
     }
 
     override fun onPause() {
         super.onPause()
+        // Stop both modes on pause to be a good citizen
         nfcManager.disableForegroundDispatch(this)
+        nfcManager.disableReaderMode(this)
     }
 
     override fun onNewIntent(intent: Intent) {
