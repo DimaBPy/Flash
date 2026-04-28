@@ -6,7 +6,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -70,30 +71,30 @@ class InteractiveHighlight(
         drawContent()
     }
 
+    // Responds to both simple taps (press → release) and drags for position tracking.
     val gestureModifier: Modifier = Modifier.pointerInput(animationScope) {
-        detectDragGestures(
-            onDragStart = { down ->
-                startPosition = down
-                animationScope.launch {
-                    launch { pressAnim.animateTo(1f, pressSpec) }
-                    launch { posAnim.snapTo(startPosition) }
-                }
-            },
-            onDragEnd = {
-                animationScope.launch {
-                    launch { pressAnim.animateTo(0f, pressSpec) }
-                    launch { posAnim.animateTo(startPosition, posSpec) }
-                }
-            },
-            onDragCancel = {
-                animationScope.launch {
-                    launch { pressAnim.animateTo(0f, pressSpec) }
-                    launch { posAnim.animateTo(startPosition, posSpec) }
-                }
-            },
-            onDrag = { change, _ ->
-                animationScope.launch { posAnim.snapTo(change.position) }
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            startPosition = down.position
+            animationScope.launch {
+                launch { pressAnim.animateTo(1f, pressSpec) }
+                launch { posAnim.snapTo(startPosition) }
             }
-        )
+            // Track pointer until lifted or cancelled
+            do {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (change.positionChanged()) {
+                    animationScope.launch { posAnim.snapTo(change.position) }
+                    change.consume()
+                }
+                if (!change.pressed) break
+            } while (true)
+            // Release
+            animationScope.launch {
+                launch { pressAnim.animateTo(0f, pressSpec) }
+                launch { posAnim.animateTo(startPosition, posSpec) }
+            }
+        }
     }
 }
