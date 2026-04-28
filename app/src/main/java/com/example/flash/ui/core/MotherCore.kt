@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -34,6 +36,7 @@ import com.example.flash.ui.theme.AquaPulse
 import com.example.flash.ui.theme.OceanAqua
 import kotlinx.coroutines.launch
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -132,7 +135,25 @@ fun MotherCore(
             )
         }
 
+        // Animated specular wobble — the highlight drifts slowly across the surface
+        val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat()
+        val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
+
         Canvas(modifier = Modifier.fillMaxSize()) {
+            // ── Blob fill: radial gradient for 3D depth ───────────────────────
+            val lightAqua = Color(0xFF80FFFF)   // top-left highlight
+            val darkTeal  = Color(0xFF003C3C)   // bottom-right shadow
+
+            val blobFill = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.0f to lightAqua.copy(alpha = 0.95f),
+                    0.45f to OceanAqua,
+                    1.0f to darkTeal
+                ),
+                center = Offset(center.x - baseRPx * 0.28f, center.y - baseRPx * 0.35f),
+                radius = baseRPx * 2.2f
+            )
+
             if (isReceiving && hollowProgress > 0.01f) {
                 val hollowR = baseRPx * hollowProgress * 0.85f
                 val coreWithHole = Path().apply {
@@ -140,8 +161,8 @@ fun MotherCore(
                     addPath(blobPath)
                     addOval(androidx.compose.ui.geometry.Rect(center, hollowR))
                 }
-                drawPath(coreWithHole, color = OceanAqua)
-                
+                drawPath(coreWithHole, brush = blobFill)
+
                 if (crystallizedBitmap != null && hollowProgress > 0.2f) {
                     val hollowPath = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, hollowR)) }
                     clipPath(hollowPath) {
@@ -149,20 +170,71 @@ fun MotherCore(
                     }
                 }
             } else {
-                drawPath(blobPath, color = OceanAqua)
+                drawPath(blobPath, brush = blobFill)
             }
 
             clipPath(blobPath) {
+                // ── Rim light: bright aqua glow on the bottom-right edge ──────
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(Color.White.copy(alpha = 0.5f), AquaGlow.copy(alpha = 0.2f), Color.Transparent),
-                        center = Offset(center.x - baseRPx * 0.3f, center.y - baseRPx * 0.4f),
+                        colors = listOf(Color.Transparent, AquaPulse.copy(0.55f), Color.Transparent),
+                        center = Offset(center.x + baseRPx * 0.55f, center.y + baseRPx * 0.5f),
                         radius = baseRPx * 0.9f
                     ),
                     radius = baseRPx * 0.9f,
-                    center = Offset(center.x - baseRPx * 0.3f, center.y - baseRPx * 0.4f)
+                    center = Offset(center.x + baseRPx * 0.55f, center.y + baseRPx * 0.5f)
+                )
+
+                // ── Primary specular: large soft highlight (top-left), animated ─
+                val spec1Center = Offset(
+                    center.x - baseRPx * 0.3f + specularShiftX,
+                    center.y - baseRPx * 0.42f + specularShiftY
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.55f),
+                            Color.White.copy(alpha = 0.18f),
+                            Color.Transparent
+                        ),
+                        center = spec1Center,
+                        radius = baseRPx * 0.82f
+                    ),
+                    radius = baseRPx * 0.82f,
+                    center = spec1Center
+                )
+
+                // ── Secondary specular: small sharp pinpoint ──────────────────
+                val spec2Center = Offset(
+                    center.x - baseRPx * 0.18f + specularShiftX * 0.6f,
+                    center.y - baseRPx * 0.32f + specularShiftY * 0.6f
+                )
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color.White.copy(0.92f), Color.Transparent),
+                        center = spec2Center,
+                        radius = baseRPx * 0.22f
+                    ),
+                    radius = baseRPx * 0.22f,
+                    center = spec2Center
+                )
+
+                // ── Depth shadow: subtle dark gradient at the bottom ──────────
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.18f)),
+                        startY = center.y + baseRPx * 0.1f,
+                        endY   = center.y + baseRPx + noiseRPx
+                    )
                 )
             }
+
+            // ── Glassy rim outline: thin bright ring around the edge ─────────
+            drawPath(
+                path  = blobPath,
+                color = Color.White.copy(alpha = 0.22f),
+                style = Stroke(width = 1.5f.dp.toPx(), cap = StrokeCap.Round)
+            )
         }
     }
 }
