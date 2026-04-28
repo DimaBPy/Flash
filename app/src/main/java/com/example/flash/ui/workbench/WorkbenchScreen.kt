@@ -8,9 +8,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box as ComposeBox
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,22 +22,32 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Surface
+import androidx.compose.ui.animation.SharedTransitionLayout
+import androidx.compose.ui.animation.fadeIn
+import androidx.compose.ui.animation.fadeOut
+import androidx.compose.ui.animation.sharedBounds
+import androidx.compose.ui.animation.rememberSharedContentState
+import androidx.compose.ui.unit.mm
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -158,33 +170,22 @@ fun WorkbenchScreen(
 
     val photoPicker  = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
     val exitBackdrop = rememberLayerBackdrop()
-    val surfaceColor = MaterialTheme.colorScheme.surface
+    val settingsBackdrop = rememberLayerBackdrop()
 
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
-    ) {
-        val screenHeight = maxHeight
-
-        // ── Glass tray ───────────────────────────────────────────────────────
+    SharedTransitionLayout {
         Box(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(screenHeight * 0.70f)
-                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(surfaceColor.copy(alpha = 0.92f))
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .systemBarsPadding()
         ) {
+            // ── Full-screen photo grid (background layer) ────────────────────
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 contentPadding = PaddingValues(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement   = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(screenHeight * 0.57f)
+                modifier = Modifier.fillMaxSize()
             ) {
                 items(uiState.photos) { uri ->
                     PhotoGridItem(
@@ -200,119 +201,126 @@ fun WorkbenchScreen(
                 }
             }
 
-            // Status text
-            val statusText = when (val s = uiState.nfcState) {
-                is NfcUiState.Idle         -> stringResource(R.string.transfer_waiting)
-                is NfcUiState.Advertising  -> stringResource(R.string.transfer_connecting)
-                is NfcUiState.Transferring -> stringResource(
-                    R.string.transfer_progress, (uiState.transferProgress * 100).toInt()
+            // ── Mother Core — spawn/exit morphs through the camera cutout ────────
+            ComposeBox(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .onGloballyPositioned { coords ->
+                        val pos = coords.positionInParent()
+                        val sz  = coords.size
+                        coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
+                    }
+            ) {
+                MotherCore(
+                    progress     = uiState.transferProgress,
+                    isReceiving  = uiState.isReceiving,
+                    shouldExit   = uiState.shouldExit,
+                    cutoutOffset = cutoutOffset,
+                    onAnimationComplete = { (context as? android.app.Activity)?.finish() }
                 )
-                is NfcUiState.Complete     -> stringResource(R.string.transfer_complete)
-                is NfcUiState.Error        -> s.message
-                else -> ""
             }
-            Text(
-                text     = statusText,
-                style    = MaterialTheme.typography.bodyMedium,
-                color    = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+
+            // ── Orbiting selected photos ─────────────────────────────────────────
+            PhotoOrbit(
+                photos     = uiState.selectedPhotos.toList(),
+                coreCenter = coreCenter
+            )
+
+            // ── Two liquid buttons at bottom center: Exit + Settings ─────────
+            Row(
+                horizontalArrangement = Arrangement.Center,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 72.dp)
-            )
-
-            // ── Liquid Glass exit button ──────────────────────────────────────
-            LiquidButton(
-                onClick   = { viewModel.onExitRequested() },
-                backdrop  = exitBackdrop,
-                enabled   = exitEnabled,
-                tint      = OceanAqua,
-                modifier  = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp)
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
             ) {
-                Text(
-                    text  = stringResource(R.string.exit_button),
-                    color = OceanAqua,
-                    style = MaterialTheme.typography.titleMedium
+                // Exit button
+                LiquidButton(
+                    onClick   = { viewModel.onExitRequested() },
+                    backdrop  = exitBackdrop,
+                    enabled   = exitEnabled,
+                    surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                    modifier  = Modifier.size(width = 120.dp, height = 48.dp)
+                ) {
+                    Text(
+                        text  = stringResource(R.string.exit_button),
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+
+                // ~3mm gap between buttons
+                Spacer(modifier = Modifier.width(3.mm))
+
+                // Settings button with container transform
+                AnimatedContent(
+                    targetState = showSettings,
+                    label = "settings_transform"
+                ) { isExpanded ->
+                    if (!isExpanded) {
+                        LiquidButton(
+                            onClick   = { showSettings = true },
+                            backdrop  = settingsBackdrop,
+                            enabled   = true,
+                            surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                            modifier  = Modifier
+                                .size(width = 120.dp, height = 48.dp)
+                                .sharedBounds(
+                                    rememberSharedContentState(key = "settings-bounds"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                    enter = fadeIn(animationSpec = tween(600, easing = FastOutSlowInEasing)),
+                                    exit = fadeOut(animationSpec = tween(600, easing = FastOutSlowInEasing))
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = stringResource(R.string.cd_settings),
+                                tint = Color.White
+                            )
+                        }
+                    } else {
+                        // Settings overlay (expands to fill screen with bottom sheet style)
+                        SettingsOverlay(
+                            backdrop = settingsBackdrop,
+                            onClose = { showSettings = false },
+                            themeRepository = app.themeRepository,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .sharedBounds(
+                                    rememberSharedContentState(key = "settings-bounds"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                    enter = fadeIn(animationSpec = tween(600, easing = FastOutSlowInEasing)),
+                                    exit = fadeOut(animationSpec = tween(600, easing = FastOutSlowInEasing))
+                                )
+                        )
+                    }
+                }
+            }
+
+            // ── "+" FAB — secondary, for manual picks ────────────────────────────
+            FloatingActionButton(
+                onClick        = { photoPicker.launch() },
+                containerColor = OceanAqua,
+                shape          = CircleShape,
+                modifier       = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp)
+                    .offset(y = (-40).dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Add photos",
+                    tint = MaterialTheme.colorScheme.onPrimary)
+            }
+
+            // ── AGSL ripple on transfer complete ─────────────────────────────────
+            if (uiState.showRipple) {
+                RippleOverlay(
+                    coreCenter = coreCenter,
+                    onComplete = { viewModel.onRippleComplete() }
                 )
             }
         }
-
-        // ── Mother Core — spawn/exit morphs through the camera cutout ────────
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .onGloballyPositioned { coords ->
-                    val pos = coords.positionInParent()
-                    val sz  = coords.size
-                    coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
-                }
-        ) {
-            MotherCore(
-                progress     = uiState.transferProgress,
-                isReceiving  = uiState.isReceiving,
-                shouldExit   = uiState.shouldExit,
-                cutoutOffset = cutoutOffset,
-                onAnimationComplete = { (context as? android.app.Activity)?.finish() }
-            )
-        }
-
-        // ── Orbiting selected photos ─────────────────────────────────────────
-        PhotoOrbit(
-            photos     = uiState.selectedPhotos.toList(),
-            coreCenter = coreCenter
-        )
-
-        // ── Settings icon ────────────────────────────────────────────────────
-        IconButton(
-            onClick  = { showSettings = true },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-        ) {
-            Icon(
-                imageVector        = Icons.Default.Settings,
-                contentDescription = stringResource(R.string.cd_settings),
-                tint               = MaterialTheme.colorScheme.onBackground
-            )
-        }
-
-        // ── "+" FAB — secondary, for manual picks ────────────────────────────
-        FloatingActionButton(
-            onClick        = { photoPicker.launch() },
-            containerColor = OceanAqua,
-            shape          = CircleShape,
-            modifier       = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(24.dp)
-                .offset(y = (-56).dp)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Add photos",
-                tint = MaterialTheme.colorScheme.onPrimary)
-        }
-
-        // ── AGSL ripple on transfer complete ─────────────────────────────────
-        if (uiState.showRipple) {
-            RippleOverlay(
-                coreCenter = coreCenter,
-                onComplete = { viewModel.onRippleComplete() }
-            )
-        }
     }
 
-    // ── Settings sheet ────────────────────────────────────────────────────────
-    if (showSettings) {
-        val sheetState = rememberModalBottomSheetState()
-        ModalBottomSheet(
-            onDismissRequest = { showSettings = false },
-            sheetState       = sheetState
-        ) {
-            SettingsScreen(
-                themeRepository = app.themeRepository,
-                onBack          = { showSettings = false }
-            )
-        }
-    }
 }
 
 @Composable
@@ -323,7 +331,7 @@ private fun PhotoGridItem(
     onDragToCore: () -> Unit,
     onTap: () -> Unit
 ) {
-    Box(
+    ComposeBox(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -339,9 +347,73 @@ private fun PhotoGridItem(
             modifier           = Modifier.fillMaxSize()
         )
         if (isInOrbit) {
-            Box(modifier = Modifier
+            ComposeBox(modifier = Modifier
                 .fillMaxSize()
                 .background(OceanAqua.copy(alpha = 0.35f)))
+        }
+    }
+}
+
+@Composable
+private fun SettingsOverlay(
+    backdrop: com.kyant.backdrop.Backdrop,
+    onClose: () -> Unit,
+    themeRepository: com.example.flash.ui.theme.ThemeRepository,
+    modifier: Modifier = Modifier
+) {
+    ComposeBox(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // Close button at top
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ArrowBack,
+                contentDescription = "Back",
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+
+        // Liquid glass settings panel at bottom
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                // Theme selection placeholder
+                Text(
+                    text = stringResource(R.string.settings_theme),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+
+                // Language selection placeholder
+                Text(
+                    text = stringResource(R.string.settings_language),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
         }
     }
 }
