@@ -128,7 +128,7 @@ fun MotherCore(
 
         // ── Lens distortion layer: refracts photos behind the blob ───────────
         if (backdrop != null) {
-            val blobDiameterDp = with(density) { (baseRPx * 2).toDp() }
+            val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
             Box(
                 modifier = Modifier
                     .size(blobDiameterDp)

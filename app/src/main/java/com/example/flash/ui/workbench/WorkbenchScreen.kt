@@ -313,7 +313,7 @@ fun WorkbenchScreen(
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 88.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add photos", tint = Color.White)
+            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_add_photos), tint = Color.White)
         }
 
         // ── AGSL ripple on transfer complete ─────────────────────────────────
