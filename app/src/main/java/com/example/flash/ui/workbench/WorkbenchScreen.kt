@@ -4,16 +4,21 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,16 +26,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -42,7 +46,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -84,7 +87,12 @@ import com.example.flash.ui.theme.OceanAqua
 import com.example.flash.ui.theme.ThemeMode
 import com.example.flash.ui.theme.ThemeRepository
 import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -171,11 +179,13 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
+    // Close settings panel on back press
+    BackHandler(enabled = showSettings) { showSettings = false }
+
     val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
-    val exitBackdrop     = rememberLayerBackdrop()
-    val settingsBackdrop = rememberLayerBackdrop()
-    val coreBackdrop     = rememberLayerBackdrop()
-    val fabBackdrop      = rememberLayerBackdrop()
+
+    // ── Single shared backdrop — grid is the capture source for all glass ───
+    val backdrop = rememberLayerBackdrop()
 
     Box(
         modifier = Modifier
@@ -183,13 +193,15 @@ fun WorkbenchScreen(
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
     ) {
-        // ── Full-screen photo grid ───────────────────────────────────────────
+        // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement   = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .layerBackdrop(backdrop)
         ) {
             items(uiState.photos) { uri ->
                 PhotoGridItem(
@@ -218,7 +230,7 @@ fun WorkbenchScreen(
                 isReceiving  = uiState.isReceiving,
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
-                backdrop     = coreBackdrop,
+                backdrop     = backdrop,
                 onAnimationComplete = { (context as? android.app.Activity)?.finish() }
             )
         }
@@ -242,7 +254,7 @@ fun WorkbenchScreen(
                 label = "settings_transform"
             ) { isOpen ->
                 if (!isOpen) {
-                    // ── Two liquid buttons with bridge ───────────────────────
+                    // ── Two liquid buttons with spacer ───────────────────────
                     Row(
                         modifier = Modifier.padding(bottom = 24.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -251,9 +263,9 @@ fun WorkbenchScreen(
                         // Exit button
                         LiquidButton(
                             onClick      = { viewModel.onExitRequested() },
-                            backdrop     = exitBackdrop,
+                            backdrop     = backdrop,
                             enabled      = exitEnabled,
-                            surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                            surfaceColor = OceanAqua.copy(alpha = 0.25f),
                             modifier     = Modifier.width(128.dp)
                         ) {
                             Text(
@@ -268,9 +280,9 @@ fun WorkbenchScreen(
                         // Settings button — sharedBounds connects it to the panel
                         LiquidButton(
                             onClick      = { showSettings = true },
-                            backdrop     = settingsBackdrop,
+                            backdrop     = backdrop,
                             enabled      = true,
-                            surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                            surfaceColor = OceanAqua.copy(alpha = 0.25f),
                             modifier     = Modifier
                                 .width(128.dp)
                                 .sharedBounds(
@@ -291,8 +303,9 @@ fun WorkbenchScreen(
                     // ── Settings panel expands from the button ───────────────
                     SettingsPanel(
                         themeRepository = app.themeRepository,
-                        onClose = { showSettings = false },
-                        modifier = Modifier
+                        backdrop        = backdrop,
+                        onClose         = { showSettings = false },
+                        modifier        = Modifier
                             .fillMaxWidth()
                             .sharedBounds(
                                 rememberSharedContentState(key = "settings-panel"),
@@ -305,16 +318,26 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── "+" liquid glass button ──────────────────────────────────────────
-        LiquidButton(
-            onClick      = { photoPicker.launch() },
-            backdrop     = fabBackdrop,
-            surfaceColor = OceanAqua.copy(alpha = 0.25f),
-            modifier     = Modifier
+        // ── "+" liquid glass button — hidden when settings panel is open ─────
+        AnimatedVisibility(
+            visible = !showSettings,
+            enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.85f),
+            exit    = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.85f),
+            modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 88.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.cd_add_photos), tint = Color.White)
+            LiquidButton(
+                onClick      = { photoPicker.launch() },
+                backdrop     = backdrop,
+                surfaceColor = OceanAqua.copy(alpha = 0.30f),
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = stringResource(R.string.cd_add_photos),
+                    tint = Color.White
+                )
+            }
         }
 
         // ── AGSL ripple on transfer complete ─────────────────────────────────
@@ -327,11 +350,12 @@ fun WorkbenchScreen(
     }
 }
 
-// ── Settings panel: compact bottom card, animates from settings button ─────────
+// ── Settings panel: liquid glass bottom container ───────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsPanel(
     themeRepository: ThemeRepository,
+    backdrop: Backdrop,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -340,19 +364,32 @@ private fun SettingsPanel(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape    = { RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) },
+                effects  = {
+                    vibrancy()
+                    blur(18f.dp.toPx())
+                    lens(4f.dp.toPx(), 8f.dp.toPx())
+                },
+                onDrawSurface = {
+                    drawRect(OceanAqua.copy(alpha = 0.07f))
+                }
+            )
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
-        // Close button at top-right of the panel (not the screen)
-        IconButton(
-            onClick  = onClose,
-            modifier = Modifier.align(Alignment.TopEnd)
+        // ── Liquid glass close button ────────────────────────────────────────
+        LiquidButton(
+            onClick      = onClose,
+            backdrop     = backdrop,
+            surfaceColor = OceanAqua.copy(alpha = 0.20f),
+            buttonHeight = 40.dp,
+            modifier     = Modifier.align(Alignment.TopEnd)
         ) {
             Icon(
                 imageVector        = Icons.Default.Close,
                 contentDescription = "Close settings",
-                tint               = MaterialTheme.colorScheme.onSurface
+                tint               = Color.White
             )
         }
 
@@ -360,13 +397,25 @@ private fun SettingsPanel(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text  = stringResource(R.string.settings_title),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            // ── Liquid glass "Settings" title pill ───────────────────────────
+            Box(
+                modifier = Modifier
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape    = { RoundedCornerShape(50) },
+                        effects  = { vibrancy(); blur(6f.dp.toPx()) },
+                        onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.12f)) }
+                    )
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text  = stringResource(R.string.settings_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White
+                )
+            }
 
-            HorizontalDivider()
+            HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
 
             Row(
                 modifier              = Modifier.fillMaxWidth(),
@@ -376,7 +425,7 @@ private fun SettingsPanel(
                 Text(
                     text  = stringResource(R.string.settings_theme),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = Color.White
                 )
                 SingleChoiceSegmentedButtonRow {
                     ThemeMode.entries.forEachIndexed { index, mode ->
