@@ -12,10 +12,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.1.7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v4.2.1
         with:
           java-version: '21'
           distribution: 'temurin'
@@ -36,7 +36,7 @@ jobs:
           echo "name=Flash v${VERSION} (${SHORT_SHA})" >> $GITHUB_OUTPUT
 
       - name: Create Release & upload APK
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.0.8
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.name }}
