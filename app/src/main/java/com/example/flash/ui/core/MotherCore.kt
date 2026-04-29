@@ -14,6 +14,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +36,11 @@ import androidx.compose.ui.unit.dp
 import com.example.flash.ui.theme.AquaGlow
 import com.example.flash.ui.theme.AquaPulse
 import com.example.flash.ui.theme.OceanAqua
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
@@ -52,6 +59,7 @@ fun MotherCore(
     crystallizedBitmap: ImageBitmap? = null,
     shouldExit: Boolean = false,
     cutoutOffset: Offset = Offset.Zero,
+    backdrop: Backdrop? = null,
     onAnimationComplete: () -> Unit = {}
 ) {
     val isDark = isSystemInDarkTheme()
@@ -116,6 +124,25 @@ fun MotherCore(
 
         val blobPath = remember(time, baseRPx, noiseRPx) {
             buildBlobPath(baseRPx + noiseRPx + 16f, baseRPx + noiseRPx + 16f, baseRPx, noiseRPx, time.toDouble())
+        }
+
+        // ── Lens distortion layer: refracts photos behind the blob ───────────
+        if (backdrop != null) {
+            val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
+            Box(
+                modifier = Modifier
+                    .size(blobDiameterDp)
+                    .align(Alignment.Center)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedCornerShape(50) },
+                        effects = {
+                            vibrancy()
+                            blur(3f.dp.toPx())
+                            lens(16f.dp.toPx(), 32f.dp.toPx())
+                        }
+                    )
+            )
         }
 
         Canvas(modifier = Modifier.fillMaxSize()) {

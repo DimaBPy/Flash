@@ -17,6 +17,7 @@
     <string name="transfer_complete">Done!</string>
     <string name="exit_button">Exit</string>
     <string name="cd_settings">Settings</string>
+    <string name="cd_add_photos">Add photos</string>
     <string name="cd_core">Mother Core</string>
     <string name="hce_service_desc">Flash Handshake Service</string>
     <string name="hce_aid_group_desc">Flash NFC Handshake</string>
