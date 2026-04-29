@@ -61,14 +61,13 @@ fun LiquidButton(
                         val width = size.width
                         val height = size.height
                         val progress = interactiveHighlight.pressProgress
-                        // 12dp growth on press (~25% for a 48dp button)
-                        val scale = lerp(1f, 1f + 12f.dp.toPx() / size.height, progress)
+                        val scale = lerp(1f, 1f + 4f.dp.toPx() / size.height, progress)
                         val maxOffset = size.minDimension
                         val initialDerivative = 0.05f
                         val dragOffset = interactiveHighlight.offset
                         translationX = maxOffset * tanh(initialDerivative * dragOffset.x / maxOffset)
                         translationY = maxOffset * tanh(initialDerivative * dragOffset.y / maxOffset)
-                        val maxDragScale = 12f.dp.toPx() / size.height
+                        val maxDragScale = 4f.dp.toPx() / size.height
                         val offsetAngle = atan2(dragOffset.y, dragOffset.x)
                         scaleX = scale +
                                 maxDragScale * abs(cos(offsetAngle) * dragOffset.x / size.maxDimension) *

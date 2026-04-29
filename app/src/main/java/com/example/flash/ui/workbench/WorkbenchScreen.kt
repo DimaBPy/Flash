@@ -6,18 +6,30 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -25,20 +37,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,17 +81,23 @@ import com.example.flash.nfc.NfcManager
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.gesture.breakawayDrag
-import com.example.flash.ui.settings.SettingsScreen
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
+import com.example.flash.ui.theme.ThemeMode
+import com.example.flash.ui.theme.ThemeRepository
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // Blob size constants mirrored from MotherCore (keep in sync)
 private const val BLOB_BASE_RADIUS_DP  = 60f
 private const val BLOB_NOISE_OFFSET_DP = 14f
 private const val BLOB_PADDING_DP      = 32f
 private val BLOB_SIZE_DP = (BLOB_BASE_RADIUS_DP * 2 + BLOB_NOISE_OFFSET_DP * 2 + BLOB_PADDING_DP).dp
+
+// 3mm ≈ 19dp; using 11dp (~1.7mm) for a visually tighter bridge
+private val BUTTON_BRIDGE_WIDTH = 11.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +120,7 @@ fun WorkbenchScreen(
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // ── Dynamic NFC mode: receiver when idle, sender (HCE) when photos selected ─
+    // ── Dynamic NFC mode ────────────────────────────────────────────────────
     LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         if (uiState.selectedPhotos.isEmpty()) {
@@ -131,126 +153,62 @@ fun WorkbenchScreen(
         if (s is NfcUiState.PeerDetected) viewModel.startDownload(s.handshake, context)
     }
 
-    // ── Camera cutout offset: punch-hole is at screen center, ~80dp from top ─
-    // X is forced to center (confirmed by device owner). Y = 80dp in window
-    // coords. We subtract statusBar to get content-area coords, then subtract
-    // the blob's own center to get the spawn/exit translation vector.
-    val cutoutOffset: Offset = with(density) {
-        remember(view, density) {
-            val cutoutX = view.width / 2f
-            val cutoutY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                view.rootWindowInsets?.displayCutout?.boundingRects
-                    ?.firstOrNull()?.centerY()?.toFloat() ?: 80.dp.toPx()
-            } else {
-                80.dp.toPx()
-            }
-            val statusBarPx = view.rootWindowInsets?.systemWindowInsetTop?.toFloat() ?: 0f
-            val blobSizePx  = BLOB_SIZE_DP.toPx()
-            val cutoutLocal = Offset(cutoutX, cutoutY) - Offset(0f, statusBarPx)
-            val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
-            cutoutLocal - blobCenter
+    // ── Camera cutout → blob-local offset ────────────────────────────────────
+    val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
+    val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
+
+    val cutoutOffset: Offset = remember(view, statusBarTopPx, blobSizePx) {
+        val cutoutCenterInWindow = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val rect = view.rootWindowInsets?.displayCutout?.boundingRects?.firstOrNull()
+            if (rect != null) Offset(rect.centerX().toFloat(), rect.centerY().toFloat())
+            else Offset(view.width / 2f, statusBarTopPx / 2f)
+        } else {
+            Offset(view.width / 2f, statusBarTopPx / 2f)
         }
+        val cutoutLocal = cutoutCenterInWindow - Offset(0f, statusBarTopPx)
+        val blobCenter  = Offset(view.width / 2f, blobSizePx / 2f)
+        cutoutLocal - blobCenter
     }
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
 
-    // Block exit button for 600ms so onboarding touch-up can't pass through
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
-    val photoPicker  = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
-    val exitBackdrop = rememberLayerBackdrop()
-    val surfaceColor = MaterialTheme.colorScheme.surface
+    val photoPicker   = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
+    val exitBackdrop  = rememberLayerBackdrop()
+    val settingsBackdrop = rememberLayerBackdrop()
 
-    // Status text computed here so it can be placed outside the tray
-    val statusText = when (val s = uiState.nfcState) {
-        is NfcUiState.Idle         -> stringResource(R.string.transfer_waiting)
-        is NfcUiState.Advertising  -> stringResource(R.string.transfer_connecting)
-        is NfcUiState.Transferring -> stringResource(
-            R.string.transfer_progress, (uiState.transferProgress * 100).toInt()
-        )
-        is NfcUiState.Complete     -> stringResource(R.string.transfer_complete)
-        is NfcUiState.Error        -> s.message
-        else -> ""
-    }
-
-    BoxWithConstraints(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .systemBarsPadding()
     ) {
-        val screenHeight = maxHeight
-
-        // ── Glass tray ───────────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(screenHeight * 0.70f)
-                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                .background(surfaceColor.copy(alpha = 0.92f))
+        // ── Full-screen photo grid ───────────────────────────────────────────
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            contentPadding = PaddingValues(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement   = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Photo grid with LiquidButton floating over it
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(screenHeight * 0.57f)
-            ) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement   = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(uiState.photos) { uri ->
-                        PhotoGridItem(
-                            uri          = uri,
-                            isInOrbit    = uri in uiState.selectedPhotos,
-                            coreCenter   = coreCenter,
-                            onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
-                            onTap = {
-                                if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
-                                else                               viewModel.onPhotoAddedToOrbit(uri)
-                            }
-                        )
+            items(uiState.photos) { uri ->
+                PhotoGridItem(
+                    uri          = uri,
+                    isInOrbit    = uri in uiState.selectedPhotos,
+                    coreCenter   = coreCenter,
+                    onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
+                    onTap = {
+                        if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
+                        else                               viewModel.onPhotoAddedToOrbit(uri)
                     }
-                }
-
-                // ── Liquid Glass exit button — floats over photos ─────────────
-                LiquidButton(
-                    onClick      = { viewModel.onExitRequested() },
-                    backdrop     = exitBackdrop,
-                    enabled      = exitEnabled,
-                    surfaceColor = OceanAqua.copy(alpha = 0.18f),
-                    modifier     = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 12.dp)
-                ) {
-                    Text(
-                        text  = stringResource(R.string.exit_button),
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
+                )
             }
         }
 
-        // ── Status text — between blob and tray ──────────────────────────────
-        if (statusText.isNotEmpty()) {
-            Text(
-                text     = statusText,
-                style    = MaterialTheme.typography.bodyMedium,
-                color    = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = BLOB_SIZE_DP + 4.dp)
-            )
-        }
-
-        // ── Mother Core — spawn/exit morphs through the camera cutout ────────
+        // ── MotherCore at top ────────────────────────────────────────────────
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -275,21 +233,92 @@ fun WorkbenchScreen(
             coreCenter = coreCenter
         )
 
-        // ── Settings icon ────────────────────────────────────────────────────
-        IconButton(
-            onClick  = { showSettings = true },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
+        // ── Bottom area: two buttons or settings panel ───────────────────────
+        SharedTransitionLayout(
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Icon(
-                imageVector        = Icons.Default.Settings,
-                contentDescription = stringResource(R.string.cd_settings),
-                tint               = MaterialTheme.colorScheme.onBackground
-            )
+            AnimatedContent(
+                targetState = showSettings,
+                transitionSpec = {
+                    fadeIn(tween(500, easing = FastOutSlowInEasing)) togetherWith
+                        fadeOut(tween(350, easing = FastOutSlowInEasing))
+                },
+                label = "settings_transform"
+            ) { isOpen ->
+                if (!isOpen) {
+                    // ── Two liquid buttons with bridge ───────────────────────
+                    Row(
+                        modifier = Modifier.padding(bottom = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        // Exit button
+                        LiquidButton(
+                            onClick      = { viewModel.onExitRequested() },
+                            backdrop     = exitBackdrop,
+                            enabled      = exitEnabled,
+                            surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                            modifier     = Modifier.width(128.dp)
+                        ) {
+                            Text(
+                                text  = stringResource(R.string.exit_button),
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+
+                        // Liquid glass bridge (~1.7mm visual connector)
+                        Box(
+                            modifier = Modifier
+                                .width(BUTTON_BRIDGE_WIDTH)
+                                .height(30.dp)
+                                .background(
+                                    OceanAqua.copy(alpha = 0.12f),
+                                    RoundedCornerShape(3.dp)
+                                )
+                        )
+
+                        // Settings button — sharedBounds connects it to the panel
+                        LiquidButton(
+                            onClick      = { showSettings = true },
+                            backdrop     = settingsBackdrop,
+                            enabled      = true,
+                            surfaceColor = OceanAqua.copy(alpha = 0.18f),
+                            modifier     = Modifier
+                                .width(128.dp)
+                                .sharedBounds(
+                                    rememberSharedContentState(key = "settings-panel"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                    enter = fadeIn(tween(500)),
+                                    exit  = fadeOut(tween(350))
+                                )
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Default.Settings,
+                                contentDescription = stringResource(R.string.cd_settings),
+                                tint               = Color.White
+                            )
+                        }
+                    }
+                } else {
+                    // ── Settings panel expands from the button ───────────────
+                    SettingsPanel(
+                        themeRepository = app.themeRepository,
+                        onClose = { showSettings = false },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .sharedBounds(
+                                rememberSharedContentState(key = "settings-panel"),
+                                animatedVisibilityScope = this@AnimatedContent,
+                                enter = fadeIn(tween(500)),
+                                exit  = fadeOut(tween(350))
+                            )
+                    )
+                }
+            }
         }
 
-        // ── "+" FAB — secondary, for manual picks ────────────────────────────
+        // ── "+" FAB ──────────────────────────────────────────────────────────
         FloatingActionButton(
             onClick        = { photoPicker.launch() },
             containerColor = OceanAqua,
@@ -297,7 +326,7 @@ fun WorkbenchScreen(
             modifier       = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(24.dp)
-                .offset(y = (-56).dp)
+                .offset(y = (-40).dp)
         ) {
             Icon(Icons.Default.Add, contentDescription = "Add photos",
                 tint = MaterialTheme.colorScheme.onPrimary)
@@ -311,22 +340,86 @@ fun WorkbenchScreen(
             )
         }
     }
+}
 
-    // ── Settings sheet ────────────────────────────────────────────────────────
-    if (showSettings) {
-        val sheetState = rememberModalBottomSheetState()
-        ModalBottomSheet(
-            onDismissRequest = { showSettings = false },
-            sheetState       = sheetState
+// ── Settings panel: compact bottom card, animates from settings button ─────────
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsPanel(
+    themeRepository: ThemeRepository,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val scope     = rememberCoroutineScope()
+    val themeMode by themeRepository.themeMode.collectAsStateWithLifecycle(ThemeMode.SYSTEM)
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+    ) {
+        // Close button at top-right of the panel (not the screen)
+        IconButton(
+            onClick  = onClose,
+            modifier = Modifier.align(Alignment.TopEnd)
         ) {
-            SettingsScreen(
-                themeRepository = app.themeRepository,
-                onBack          = { showSettings = false }
+            Icon(
+                imageVector        = Icons.Default.Close,
+                contentDescription = "Close settings",
+                tint               = MaterialTheme.colorScheme.onSurface
             )
+        }
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text  = stringResource(R.string.settings_title),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            HorizontalDivider()
+
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
+            ) {
+                Text(
+                    text  = stringResource(R.string.settings_theme),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                SingleChoiceSegmentedButtonRow {
+                    ThemeMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = themeMode == mode,
+                            onClick  = { scope.launch { themeRepository.setThemeMode(mode) } },
+                            shape    = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                            label = {
+                                Text(
+                                    text  = when (mode) {
+                                        ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
+                                        ThemeMode.DARK   -> stringResource(R.string.theme_dark)
+                                        ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
+                                    },
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
+// ── Photo grid item ─────────────────────────────────────────────────────────────
 @Composable
 private fun PhotoGridItem(
     uri: Uri,
