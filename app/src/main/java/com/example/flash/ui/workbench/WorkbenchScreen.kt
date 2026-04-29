@@ -21,9 +21,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,14 +33,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,7 +78,6 @@ import com.example.flash.R
 import com.example.flash.nfc.NfcManager
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
-import com.example.flash.ui.gesture.breakawayDrag
 import com.example.flash.ui.shader.RippleOverlay
 import com.example.flash.ui.theme.OceanAqua
 import com.example.flash.ui.theme.ThemeMode
@@ -95,9 +92,6 @@ private const val BLOB_BASE_RADIUS_DP  = 60f
 private const val BLOB_NOISE_OFFSET_DP = 14f
 private const val BLOB_PADDING_DP      = 32f
 private val BLOB_SIZE_DP = (BLOB_BASE_RADIUS_DP * 2 + BLOB_NOISE_OFFSET_DP * 2 + BLOB_PADDING_DP).dp
-
-// 3mm ≈ 19dp; using 11dp (~1.7mm) for a visually tighter bridge
-private val BUTTON_BRIDGE_WIDTH = 11.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,9 +170,11 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
-    val photoPicker   = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
-    val exitBackdrop  = rememberLayerBackdrop()
+    val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
+    val exitBackdrop     = rememberLayerBackdrop()
     val settingsBackdrop = rememberLayerBackdrop()
+    val coreBackdrop     = rememberLayerBackdrop()
+    val fabBackdrop      = rememberLayerBackdrop()
 
     Box(
         modifier = Modifier
@@ -196,10 +192,8 @@ fun WorkbenchScreen(
         ) {
             items(uiState.photos) { uri ->
                 PhotoGridItem(
-                    uri          = uri,
-                    isInOrbit    = uri in uiState.selectedPhotos,
-                    coreCenter   = coreCenter,
-                    onDragToCore = { viewModel.onPhotoDraggedToCore(uri, context) },
+                    uri       = uri,
+                    isInOrbit = uri in uiState.selectedPhotos,
                     onTap = {
                         if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
                         else                               viewModel.onPhotoAddedToOrbit(uri)
@@ -223,6 +217,7 @@ fun WorkbenchScreen(
                 isReceiving  = uiState.isReceiving,
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
+                backdrop     = coreBackdrop,
                 onAnimationComplete = { (context as? android.app.Activity)?.finish() }
             )
         }
@@ -267,16 +262,7 @@ fun WorkbenchScreen(
                             )
                         }
 
-                        // Liquid glass bridge (~1.7mm visual connector)
-                        Box(
-                            modifier = Modifier
-                                .width(BUTTON_BRIDGE_WIDTH)
-                                .height(30.dp)
-                                .background(
-                                    OceanAqua.copy(alpha = 0.12f),
-                                    RoundedCornerShape(3.dp)
-                                )
-                        )
+                        Spacer(Modifier.width(12.dp))
 
                         // Settings button — sharedBounds connects it to the panel
                         LiquidButton(
@@ -318,18 +304,16 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── "+" FAB ──────────────────────────────────────────────────────────
-        FloatingActionButton(
-            onClick        = { photoPicker.launch() },
-            containerColor = OceanAqua,
-            shape          = CircleShape,
-            modifier       = Modifier
+        // ── "+" liquid glass button ──────────────────────────────────────────
+        LiquidButton(
+            onClick      = { photoPicker.launch() },
+            backdrop     = fabBackdrop,
+            surfaceColor = OceanAqua.copy(alpha = 0.25f),
+            modifier     = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(24.dp)
-                .offset(y = (-40).dp)
+                .padding(end = 24.dp, bottom = 88.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add photos",
-                tint = MaterialTheme.colorScheme.onPrimary)
+            Icon(Icons.Default.Add, contentDescription = "Add photos", tint = Color.White)
         }
 
         // ── AGSL ripple on transfer complete ─────────────────────────────────
@@ -424,18 +408,13 @@ private fun SettingsPanel(
 private fun PhotoGridItem(
     uri: Uri,
     isInOrbit: Boolean,
-    coreCenter: Offset,
-    onDragToCore: () -> Unit,
     onTap: () -> Unit
 ) {
     Box(
         modifier = Modifier
             .size(100.dp)
             .clip(RoundedCornerShape(12.dp))
-            .breakawayDrag(
-                coreCenter   = coreCenter,
-                onDragToCore = { _ -> onDragToCore() }
-            )
+            .clickable(onClick = onTap)
     ) {
         AsyncImage(
             model              = uri,
