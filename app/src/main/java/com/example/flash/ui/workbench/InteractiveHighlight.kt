@@ -6,7 +6,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -71,9 +70,9 @@ class InteractiveHighlight(
     }
 
     val gestureModifier: Modifier = Modifier.pointerInput(animationScope) {
-        detectDragGestures(
+        inspectDragGestures(
             onDragStart = { down ->
-                startPosition = down
+                startPosition = down.position
                 animationScope.launch {
                     launch { pressAnim.animateTo(1f, pressSpec) }
                     launch { posAnim.snapTo(startPosition) }
@@ -90,10 +89,9 @@ class InteractiveHighlight(
                     launch { pressAnim.animateTo(0f, pressSpec) }
                     launch { posAnim.animateTo(startPosition, posSpec) }
                 }
-            },
-            onDrag = { change, _ ->
-                animationScope.launch { posAnim.snapTo(change.position) }
             }
-        )
+        ) { change, _ ->
+            animationScope.launch { posAnim.snapTo(change.position) }
+        }
     }
 }
