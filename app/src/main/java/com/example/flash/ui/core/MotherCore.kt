@@ -100,10 +100,11 @@ fun MotherCore(
         if (shouldExit && !exitDone) {
             exitDone = true
             val spec = tween<Float>(3000, easing = FastOutSlowInEasing)
-            val job = launch { exitScale.animateTo(0f, spec) }
-            launch { exitTx.animateTo(cutoutOffset.x, spec) }
-            launch { exitTy.animateTo(cutoutOffset.y, spec) }
-            job.join()
+            coroutineScope {
+                launch { exitScale.animateTo(0f, spec) }
+                launch { exitTx.animateTo(cutoutOffset.x, spec) }
+                launch { exitTy.animateTo(cutoutOffset.y, spec) }
+            }
             onAnimationComplete()
         }
     }

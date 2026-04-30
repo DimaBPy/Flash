@@ -178,8 +178,10 @@ fun WorkbenchScreen(
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
     val screenExitY = remember { Animatable(0f) }
+    var screenExitStarted by remember { mutableStateOf(false) }
     LaunchedEffect(uiState.shouldExit) {
-        if (uiState.shouldExit) {
+        if (uiState.shouldExit && !screenExitStarted) {
+            screenExitStarted = true
             screenExitY.animateTo(
                 targetValue = with(density) { 1200.dp.toPx() },
                 animationSpec = tween(3000, easing = FastOutSlowInEasing)
@@ -247,7 +249,7 @@ fun WorkbenchScreen(
         // ── Orbiting selected photos ─────────────────────────────────────────
         PhotoOrbit(
             photos     = uiState.selectedPhotos.toList(),
-            coreCenter = coreCenter,
+            coreCenter = coreCenter.copy(y = coreCenter.y + screenExitY.value),
             modifier   = Modifier.graphicsLayer { translationY = screenExitY.value }
         )
 
