@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -47,9 +48,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -179,6 +177,18 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
+    val screenExitY = remember { Animatable(0f) }
+    var screenExitStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.shouldExit) {
+        if (uiState.shouldExit && !screenExitStarted) {
+            screenExitStarted = true
+            screenExitY.animateTo(
+                targetValue = with(density) { 1200.dp.toPx() },
+                animationSpec = tween(3000, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+
     // Close settings panel on back press
     BackHandler(enabled = showSettings) { showSettings = false }
 
@@ -202,6 +212,7 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
+                .graphicsLayer { translationY = screenExitY.value }
         ) {
             items(uiState.photos) { uri ->
                 PhotoGridItem(
@@ -238,12 +249,15 @@ fun WorkbenchScreen(
         // ── Orbiting selected photos ─────────────────────────────────────────
         PhotoOrbit(
             photos     = uiState.selectedPhotos.toList(),
-            coreCenter = coreCenter
+            coreCenter = coreCenter.copy(y = coreCenter.y + screenExitY.value),
+            modifier   = Modifier.graphicsLayer { translationY = screenExitY.value }
         )
 
         // ── Bottom area: two buttons or settings panel ───────────────────────
         SharedTransitionLayout(
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .graphicsLayer { translationY = screenExitY.value }
         ) {
             AnimatedContent(
                 targetState = showSettings,
@@ -326,6 +340,7 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 88.dp)
+                .graphicsLayer { translationY = screenExitY.value }
         ) {
             LiquidButton(
                 onClick      = { photoPicker.launch() },
@@ -350,8 +365,63 @@ fun WorkbenchScreen(
     }
 }
 
+// ── Liquid glass segmented button row ──────────────────────────────────────
+@Composable
+private fun <T> LiquidSegmentedButtonRow(
+    items: List<T>,
+    selectedItem: T,
+    onItemSelected: (T) -> Unit,
+    backdrop: Backdrop,
+    label: @Composable (T) -> String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        items.forEachIndexed { index, item ->
+            val isFirst = index == 0
+            val isLast = index == items.size - 1
+            val isSelected = selectedItem == item
+
+            val shape = when {
+                isFirst && isLast -> RoundedCornerShape(12.dp)
+                isFirst -> RoundedCornerShape(
+                    topStart = 12.dp,
+                    bottomStart = 12.dp,
+                    topEnd = 2.dp,
+                    bottomEnd = 2.dp
+                )
+                isLast -> RoundedCornerShape(
+                    topStart = 2.dp,
+                    bottomStart = 2.dp,
+                    topEnd = 12.dp,
+                    bottomEnd = 12.dp
+                )
+                else -> RoundedCornerShape(2.dp)
+            }
+
+            LiquidButton(
+                onClick = { onItemSelected(item) },
+                backdrop = backdrop,
+                surfaceColor = if (isSelected) OceanAqua.copy(alpha = 0.45f) else OceanAqua.copy(alpha = 0.15f),
+                buttonHeight = 40.dp,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(shape),
+                isInteractive = true
+            ) {
+                Text(
+                    text = label(item),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
 // ── Settings panel: liquid glass bottom container ───────────────────────────
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsPanel(
     themeRepository: ThemeRepository,
@@ -370,7 +440,7 @@ private fun SettingsPanel(
                 effects  = {
                     vibrancy()
                     blur(18f.dp.toPx())
-                    lens(4f.dp.toPx(), 8f.dp.toPx())
+                    lens(12f.dp.toPx(), 24f.dp.toPx())
                 },
                 onDrawSurface = {
                     drawRect(OceanAqua.copy(alpha = 0.07f))
@@ -403,7 +473,11 @@ private fun SettingsPanel(
                     .drawBackdrop(
                         backdrop = backdrop,
                         shape    = { RoundedCornerShape(50) },
-                        effects  = { vibrancy(); blur(6f.dp.toPx()) },
+                        effects  = {
+                            vibrancy()
+                            blur(6f.dp.toPx())
+                            lens(8f.dp.toPx(), 16f.dp.toPx())
+                        },
                         onDrawSurface = { drawRect(OceanAqua.copy(alpha = 0.12f)) }
                     )
                     .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -417,35 +491,28 @@ private fun SettingsPanel(
 
             HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
 
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
                     text  = stringResource(R.string.settings_theme),
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White
                 )
-                SingleChoiceSegmentedButtonRow {
-                    ThemeMode.entries.forEachIndexed { index, mode ->
-                        SegmentedButton(
-                            selected = themeMode == mode,
-                            onClick  = { scope.launch { themeRepository.setThemeMode(mode) } },
-                            shape    = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
-                            label = {
-                                Text(
-                                    text  = when (mode) {
-                                        ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
-                                        ThemeMode.DARK   -> stringResource(R.string.theme_dark)
-                                        ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
-                                    },
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        )
+                LiquidSegmentedButtonRow(
+                    items = ThemeMode.entries,
+                    selectedItem = themeMode,
+                    onItemSelected = { scope.launch { themeRepository.setThemeMode(it) } },
+                    backdrop = backdrop,
+                    label = { mode ->
+                        when (mode) {
+                            ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
+                            ThemeMode.DARK   -> stringResource(R.string.theme_dark)
+                            ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
+                        }
                     }
-                }
+                )
             }
 
             Spacer(Modifier.height(8.dp))

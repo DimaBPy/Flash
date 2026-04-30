@@ -78,7 +78,7 @@ class InteractiveHighlight(
                     launch { posAnim.snapTo(startPosition) }
                 }
             },
-            onDragEnd = {
+            onDragEnd = { _ ->
                 animationScope.launch {
                     launch { pressAnim.animateTo(0f, pressSpec) }
                     launch { posAnim.animateTo(startPosition, posSpec) }

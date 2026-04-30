@@ -1,13 +1,13 @@
 package com.example.flash.ui.core
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -69,7 +69,10 @@ fun MotherCore(
     val time by infiniteTransition.animateFloat(
         initialValue  = 0f,
         targetValue   = 1000f,
-        animationSpec = infiniteRepeatable(tween(8_000, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(
+            animation = tween(8_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
         label         = "time"
     )
 
@@ -83,7 +86,7 @@ fun MotherCore(
     val spawnTx    = remember { Animatable(cutoutOffset.x) }
     val spawnTy    = remember { Animatable(cutoutOffset.y) }
     LaunchedEffect(Unit) {
-        val spec = spring<Float>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow)
+        val spec = tween<Float>(3000, easing = FastOutSlowInEasing)
         launch { spawnScale.animateTo(1f, spec) }
         launch { spawnTx.animateTo(0f, spec) }
         launch { spawnTy.animateTo(0f, spec) }
@@ -95,11 +98,13 @@ fun MotherCore(
     var exitDone  by remember { mutableStateOf(false) }
     LaunchedEffect(shouldExit) {
         if (shouldExit && !exitDone) {
-            val spec = spring<Float>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium)
-            launch { exitScale.animateTo(0f, spec) }
-            launch { exitTx.animateTo(cutoutOffset.x, spec) }
-            launch { exitTy.animateTo(cutoutOffset.y, spec) }
             exitDone = true
+            val spec = tween<Float>(3000, easing = FastOutSlowInEasing)
+            coroutineScope {
+                launch { exitScale.animateTo(0f, spec) }
+                launch { exitTx.animateTo(cutoutOffset.x, spec) }
+                launch { exitTy.animateTo(cutoutOffset.y, spec) }
+            }
             onAnimationComplete()
         }
     }
@@ -121,9 +126,10 @@ fun MotherCore(
     ) {
         val baseRPx  = with(density) { BASE_RADIUS_DP.dp.toPx() }
         val noiseRPx = with(density) { NOISE_OFFSET_DP.dp.toPx() }
+        val blobCx   = with(density) { blobSize.toPx() / 2f }
 
-        val blobPath = remember(time, baseRPx, noiseRPx) {
-            buildBlobPath(baseRPx + noiseRPx + 16f, baseRPx + noiseRPx + 16f, baseRPx, noiseRPx, time.toDouble())
+        val blobPath = remember(time, baseRPx, noiseRPx, blobCx) {
+            buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, time.toDouble())
         }
 
         // ── Lens distortion layer: refracts photos behind the blob ───────────
@@ -140,6 +146,9 @@ fun MotherCore(
                             vibrancy()
                             blur(3f.dp.toPx())
                             lens(16f.dp.toPx(), 32f.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(AquaGlow)
                         }
                     )
             )
@@ -196,8 +205,6 @@ fun MotherCore(
                         drawImage(crystallizedBitmap, topLeft = Offset(center.x - hollowR, center.y - hollowR))
                     }
                 }
-            } else {
-                drawPath(blobPath, brush = blobFill)
             }
 
             clipPath(blobPath) {
