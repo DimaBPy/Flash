@@ -553,6 +553,9 @@ private fun ReceivedPhotoFlyer(
 
     val progress = animProgress.value
 
+    // Only render while animating; once complete, photo is in gallery at Z0
+    if (progress >= 1f) return
+
     val gridItemSizeDp = 100.dp
     val paddingDp = 8.dp
     val gapDp = 4.dp
@@ -566,18 +569,24 @@ private fun ReceivedPhotoFlyer(
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
 
-    // Phase 1 (0-0.3): Move horizontally to clear blob
-    val horizontalPhase = (progress / 0.3f).coerceIn(0f, 1f)
+    // Phase 1 (0-0.2): Materialize with scale pulse + brief orbit glow
+    val pulsePhase = (progress / 0.2f).coerceIn(0f, 1f)
+    val pulseScale = if (pulsePhase < 0.5f) {
+        lerp(0f, 1.2f, pulsePhase * 2f)
+    } else {
+        lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
+    }
+
+    // Phase 2 (0.2-0.4): Move horizontally to clear blob
+    val horizontalPhase = ((progress - 0.2f) / 0.2f).coerceIn(0f, 1f)
     val horizontalDir = if (targetX < coreCenter.x) -1f else 1f
     val clearDistance = with(density) { 150.dp.toPx() }
     val clearX = coreCenter.x + (clearDistance * horizontalDir * horizontalPhase)
-    val zHorizontal = lerp(3f, 1f, horizontalPhase)
 
-    // Phase 2 (0.3-1): Fly to target grid position
-    val flightPhase = ((progress - 0.3f) / 0.7f).coerceIn(0f, 1f)
+    // Phase 3 (0.4-1): Fly to target grid position at Z1
+    val flightPhase = ((progress - 0.4f) / 0.6f).coerceIn(0f, 1f)
     val x = lerp(clearX, targetX, flightPhase)
     val y = lerp(coreCenter.y, targetY, flightPhase)
-    val z = lerp(zHorizontal, 0f, flightPhase)
 
     AsyncImage(
         model = uri,
@@ -593,7 +602,10 @@ private fun ReceivedPhotoFlyer(
             }
             .clip(RoundedCornerShape(12.dp))
             .graphicsLayer {
-                translationZ = z
+                val displayScale = if (progress < 0.2f) pulseScale else 1f
+                scaleX = displayScale
+                scaleY = displayScale
+                translationZ = 1f  // Stay at Z1 throughout flight, prevent z-fighting
             }
     )
 }
