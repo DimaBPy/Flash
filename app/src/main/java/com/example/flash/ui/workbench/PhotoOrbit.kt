@@ -17,23 +17,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
@@ -42,6 +40,11 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
+
+// Golden angle — each new photo lands at a position that never bunches with others,
+// regardless of how many photos are added over time.
+private val GOLDEN_ANGLE = (PI * (3.0 - sqrt(5.0))).toFloat()
 
 @Composable
 fun PhotoOrbit(
@@ -85,16 +88,23 @@ fun PhotoOrbit(
     val photoSizeDp = 56.dp
     val photoSizePx = with(density) { photoSizeDp.toPx() }
 
-    // Track all photos including those animating out
     val visiblePhotos = remember { mutableStateListOf<Uri>() }
     val exitingPhotos = remember { mutableStateSetOf<Uri>() }
+    // Each URI gets a golden-angle phase assigned once on entry — never recalculated,
+    // so adding a new photo cannot shift existing photos' positions.
+    val phaseMap = remember { mutableStateMapOf<Uri, Float>() }
+    var nextPhaseIndex by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(photos) {
-        // Add newly arrived photos
         photos.forEach { uri ->
-            if (uri !in visiblePhotos) visiblePhotos.add(uri)
+            if (uri !in visiblePhotos) {
+                visiblePhotos.add(uri)
+            }
+            if (uri !in phaseMap) {
+                phaseMap[uri] = nextPhaseIndex * GOLDEN_ANGLE
+                nextPhaseIndex++
+            }
         }
-        // Mark removed photos as exiting (they'll animate out)
         visiblePhotos.filter { it !in photos && it !in exitingPhotos }.forEach { uri ->
             exitingPhotos.add(uri)
         }
@@ -103,12 +113,12 @@ fun PhotoOrbit(
     if (visiblePhotos.isEmpty()) return
 
     Box(modifier = modifier.fillMaxSize()) {
-        visiblePhotos.toList().forEachIndexed { index, uri ->
+        visiblePhotos.toList().forEach { uri ->
             key(uri) {
+                val phaseOffset = phaseMap[uri] ?: 0f
                 OrbitPhotoItem(
                     uri = uri,
-                    index = index,
-                    totalPhotos = visiblePhotos.size,
+                    phaseOffset = phaseOffset,
                     coreCenter = coreCenter,
                     time = time,
                     blobTime = blobTime,
@@ -120,6 +130,7 @@ fun PhotoOrbit(
                     onExitComplete = {
                         visiblePhotos.remove(uri)
                         exitingPhotos.remove(uri)
+                        phaseMap.remove(uri)
                     }
                 )
             }
@@ -130,8 +141,7 @@ fun PhotoOrbit(
 @Composable
 private fun OrbitPhotoItem(
     uri: Uri,
-    index: Int,
-    totalPhotos: Int,
+    phaseOffset: Float,
     coreCenter: Offset,
     time: Float,
     blobTime: Float,
@@ -143,14 +153,12 @@ private fun OrbitPhotoItem(
     onExitComplete: () -> Unit
 ) {
     val entryProgress = remember { Animatable(0f) }
-    val exitProgress = remember { Animatable(0f) }
+    val exitProgress  = remember { Animatable(0f) }
 
-    // Entry animation
     LaunchedEffect(Unit) {
         entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
     }
 
-    // Exit animation
     LaunchedEffect(isExiting) {
         if (isExiting && exitProgress.value == 0f) {
             exitProgress.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
@@ -158,21 +166,18 @@ private fun OrbitPhotoItem(
         }
     }
 
-    val phaseOffset = (index.toFloat() / totalPhotos) * (2 * PI).toFloat()
     val orbitR = baseOrbitRadiusPx + radialDrift
-
     val orbitX = coreCenter.x + orbitR * cos(time + phaseOffset)
     val orbitY = coreCenter.y + orbitR * sin(time + phaseOffset)
 
     val ep = entryProgress.value
     val xp = exitProgress.value
 
-    // During exit: lerp toward coreCenter; during entry: lerp from coreCenter
-    val x = lerp(lerp(coreCenter.x, orbitX, ep), coreCenter.x, xp)
-    val y = lerp(lerp(coreCenter.y, orbitY, ep), coreCenter.y, xp)
+    val x     = lerp(lerp(coreCenter.x, orbitX, ep), coreCenter.x, xp)
+    val y     = lerp(lerp(coreCenter.y, orbitY, ep), coreCenter.y, xp)
     val scale = lerp(ep, 0f, xp)
 
-    val photoBlobTime = (blobTime + index * 137f).toDouble()
+    val photoBlobTime = (blobTime + phaseOffset * 137f).toDouble()
 
     AsyncImage(
         model = uri,
@@ -189,7 +194,7 @@ private fun OrbitPhotoItem(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                alpha = scale
+                alpha  = scale
             }
             .drawWithCache {
                 val path = Path()

@@ -49,6 +49,8 @@ class WorkbenchViewModel(
     val uiState: StateFlow<WorkbenchUiState> = _uiState.asStateFlow()
 
     private var currentToken: String = ""
+    private var currentIp: String = ""
+    private var currentPort: Int = 0
 
     init {
         nfcManager.peerHandshakeFlow
@@ -66,7 +68,6 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
     }
 
-    /** Loads up to 60 most-recent camera-roll images without any picker UI. */
     fun loadGalleryPhotos(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val photos = mutableListOf<Uri>()
@@ -90,7 +91,6 @@ class WorkbenchViewModel(
         }
     }
 
-    /** Appends manually-picked URIs (from the "+" FAB) to the existing list. */
     fun onPhotosSelected(uris: List<Uri>) {
         _uiState.update {
             it.copy(
@@ -98,33 +98,46 @@ class WorkbenchViewModel(
                 selectedPhotos = it.selectedPhotos + uris
             )
         }
-        uris.firstOrNull()?.let { uri -> prepareSenderHandshake(uri) }
+        addToOrUpdateServer(uris)
     }
 
     fun onPhotoAddedToOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
-        // When photos are added to orbit, prepare for sending
-        prepareSenderHandshake(uri)
+        addToOrUpdateServer(listOf(uri))
     }
 
     fun onPhotoRemovedFromOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos - uri) }
         if (_uiState.value.selectedPhotos.isEmpty()) {
             nfcManager.clearOutboundHandshake()
+            currentPort = 0
         }
     }
 
-    private fun prepareSenderHandshake(uri: Uri) {
-        currentToken = UUID.randomUUID().toString()
+    private fun addToOrUpdateServer(uris: List<Uri>) {
         viewModelScope.launch {
             try {
-                // FlashApplication.instance might be null if not initialized, 
-                // but we are in a ViewModel so it's fine.
                 val context = com.example.flash.FlashApplication.instance
                 val localIp = transferRepository.getLocalIp(context)
-                val port = transferRepository.startServing(currentToken, uri, context)
-                nfcManager.setOutboundHandshake(localIp, port, currentToken, "en")
-                _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
+
+                if (currentPort != 0) {
+                    // Server already running — add files without restarting
+                    uris.forEach { uri -> transferRepository.addFileToServing(currentToken, uri) }
+                    nfcManager.setOutboundHandshake(
+                        localIp, currentPort, currentToken, "en",
+                        transferRepository.servingFileCount
+                    )
+                } else {
+                    // No server yet — start fresh
+                    currentToken = UUID.randomUUID().toString()
+                    currentIp = localIp
+                    currentPort = transferRepository.startServing(currentToken, uris, context)
+                    nfcManager.setOutboundHandshake(
+                        localIp, currentPort, currentToken, "en",
+                        transferRepository.servingFileCount
+                    )
+                    _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
+                }
             } catch (_: Exception) { }
         }
     }
@@ -134,29 +147,18 @@ class WorkbenchViewModel(
     }
 
     fun onPhotoDraggedToCore(uri: Uri, context: Context) {
-        currentToken = UUID.randomUUID().toString()
-        viewModelScope.launch {
-            try {
-                val localIp = transferRepository.getLocalIp(context)
-                val port = transferRepository.startServing(currentToken, uri, context)
-                nfcManager.setOutboundHandshake(localIp, port, currentToken, "en")
-                _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(nfcState = NfcUiState.Error(e.message ?: "Server error")) }
-            }
-        }
+        _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        addToOrUpdateServer(listOf(uri))
     }
 
     private fun onNfcPeerDetected(handshake: PeerHandshake) {
-        // If we are currently in sender mode (have selected photos), 
-        // we might ignore incoming handshakes to avoid cross-talk.
         if (_uiState.value.selectedPhotos.isEmpty()) {
             _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
         }
     }
 
     fun startDownload(handshake: PeerHandshake, context: Context) {
-        transferRepository.startDownload(handshake.ip, handshake.port, handshake.token, context)
+        transferRepository.startDownload(handshake.ip, handshake.port, handshake.token, handshake.fileCount, context)
         _uiState.update { it.copy(nfcState = NfcUiState.Transferring) }
     }
 
@@ -179,6 +181,7 @@ class WorkbenchViewModel(
     fun onRippleComplete() {
         _uiState.update { it.copy(showRipple = false, isReceiving = false, transferProgress = 0f) }
         transferRepository.reset()
+        currentPort = 0
     }
 
     fun onExitRequested() {

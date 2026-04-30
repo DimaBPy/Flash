@@ -19,7 +19,8 @@ data class PeerHandshake(
     val ip: String,
     val port: Int,
     val token: String,
-    val lang: String
+    val lang: String,
+    val fileCount: Int = 1
 )
 
 class NfcManager(private val context: Context) {
@@ -39,19 +40,19 @@ class NfcManager(private val context: Context) {
         activity = act
     }
 
-    fun setOutboundHandshake(ip: String, port: Int, token: String, lang: String) {
+    fun setOutboundHandshake(ip: String, port: Int, token: String, lang: String, fileCount: Int = 1) {
         val json = JSONObject().apply {
             put("ip", ip)
             put("port", port)
             put("token", token)
             put("lang", lang)
+            put("fileCount", fileCount)
         }.toString()
 
         val msg = NdefMessage(
             NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
         )
         outboundMessage = msg
-        // Update the HCE service data
         HandshakeHceService.ndefMessageBytes = msg.toByteArray()
     }
 
@@ -113,7 +114,6 @@ class NfcManager(private val context: Context) {
             return
         }
 
-        // Fallback: read NDEF from tag directly
         val tag = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
         } else {
@@ -121,8 +121,6 @@ class NfcManager(private val context: Context) {
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
         }
         tag?.let { readTagAndEmit(it) }
-
-        // Write our outbound message to the tag if we have one
         tag?.let { writeOutboundToTag(it) }
     }
 
@@ -159,10 +157,11 @@ class NfcManager(private val context: Context) {
 
             val handshake = runCatching {
                 PeerHandshake(
-                    ip    = json.getString("ip"),
-                    port  = json.getInt("port"),
-                    token = json.getString("token"),
-                    lang  = json.optString("lang", "en")
+                    ip        = json.getString("ip"),
+                    port      = json.getInt("port"),
+                    token     = json.getString("token"),
+                    lang      = json.optString("lang", "en"),
+                    fileCount = json.optInt("fileCount", 1)
                 )
             }.getOrNull() ?: continue
 
