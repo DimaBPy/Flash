@@ -35,7 +35,7 @@ A premium NFC file-sharing Android application with physics-based animations, li
 
 ## To-Do
 
-(To be populated)
+- [ ] Simultaneous receiving and sending (currently sender mode rejects incoming handshakes)
 
 ---
 
