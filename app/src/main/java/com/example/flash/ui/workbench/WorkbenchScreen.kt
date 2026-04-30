@@ -93,6 +93,7 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -617,8 +618,8 @@ private fun ReceivedPhotoMaterializeFlyer(
             .graphicsLayer {
                 scaleX = currentScale
                 scaleY = currentScale
-                translationZ = 3f  // On top during flight
             }
+            .zIndex(3f)
             .clip(RoundedCornerShape(8.dp))
     )
 }
@@ -675,9 +676,7 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
                 )
             }
             .clip(RoundedCornerShape(12.dp))
-            .graphicsLayer {
-                translationZ = 1f  // Z1 throughout flight
-            }
+            .zIndex(1f)
     )
 }
 
@@ -749,8 +748,8 @@ private fun ReceivedPhotoFlyer(
                 val displayScale = if (progress < 0.2f) pulseScale else 1f
                 scaleX = displayScale
                 scaleY = displayScale
-                translationZ = 1f  // Stay at Z1 throughout flight, prevent z-fighting
             }
+            .zIndex(1f)
     )
 }
 

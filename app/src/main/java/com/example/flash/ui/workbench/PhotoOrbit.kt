@@ -102,11 +102,10 @@ fun PhotoOrbit(
 
     val successPulse = remember { Animatable(0f) }
     LaunchedEffect(transferProgress, receivingPhotos) {
-        // Trigger success animation when transfer completes OR when receiving photos arrive
-        if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
-            // Scale up (bloom phase)
+        if (transferProgress < 1f && successPulse.value != 0f) {
+            successPulse.snapTo(0f)  // Reset for next transfer
+        } else if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
             successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
-            // Scale down to zero + move to center (collapse phase)
             successPulse.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 180f))
         }
     }

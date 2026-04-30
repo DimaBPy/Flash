@@ -36,6 +36,7 @@ A premium NFC file-sharing Android application with physics-based animations, li
 ## To-Do
 
 - [ ] Simultaneous receiving and sending (currently sender mode rejects incoming handshakes)
+- [ ] Gallery flight destination derived from real grid layout (currently uses fixed dp constants that may not match actual `LazyVerticalGrid` cell positions on all screen sizes)
 
 ---
 

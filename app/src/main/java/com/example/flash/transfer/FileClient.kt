@@ -9,8 +9,8 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import java.io.File
 import java.io.IOException
 
@@ -35,15 +35,17 @@ class FileClient {
         val files = arrayOfNulls<File>(fileCount)
         val lock = Any()
 
-        coroutineScope {
+        supervisorScope {
             (0 until fileCount).forEach { index ->
                 launch {
-                    files[index] = download(ip, port, token, index, destDir) { progress ->
-                        synchronized(lock) {
-                            progresses[index] = progress
-                            onProgress(progresses.average().toFloat())
+                    runCatching {
+                        download(ip, port, token, index, destDir) { progress ->
+                            synchronized(lock) {
+                                progresses[index] = progress
+                                onProgress(progresses.average().toFloat())
+                            }
                         }
-                    }
+                    }.onSuccess { files[index] = it }
                 }
             }
         }
@@ -70,8 +72,9 @@ class FileClient {
 
         val contentLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
         val rawDisposition = response.headers[HttpHeaders.ContentDisposition] ?: ""
-        val fileName = sanitizeFileName(extractFileName(rawDisposition))
-            ?: "received_${System.currentTimeMillis()}_$index"
+        val baseName = sanitizeFileName(extractFileName(rawDisposition))
+            ?: "received_${System.currentTimeMillis()}"
+        val fileName = "${index}_$baseName"
 
         val dest = File(destDir, fileName)
         require(dest.canonicalPath.startsWith(destDir.canonicalPath + File.separator)) {

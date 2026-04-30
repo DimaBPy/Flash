@@ -39,7 +39,11 @@ class FileServer(private val scope: CoroutineScope) {
             routing {
                 get("/transfer/{token}/{index}") {
                     val requestToken = call.parameters["token"] ?: ""
-                    val index = call.parameters["index"]?.toIntOrNull() ?: 0
+                    val index = call.parameters["index"]?.toIntOrNull()
+                    if (index == null || index < 0) {
+                        call.respond(HttpStatusCode.BadRequest)
+                        return@get
+                    }
                     val entry = entries.getOrNull(index)
                     if (entry == null || entry.first != requestToken) {
                         call.respond(HttpStatusCode.NotFound)
@@ -51,10 +55,16 @@ class FileServer(private val scope: CoroutineScope) {
                     val fileName = fileUri.lastPathSegment ?: "file"
                     val fileSize = cr.openFileDescriptor(fileUri, "r")?.use { it.statSize } ?: 0L
 
+                    val input = cr.openInputStream(fileUri)
+                    if (input == null) {
+                        call.respond(HttpStatusCode.NotFound)
+                        return@get
+                    }
+
                     call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"$fileName\"")
                     call.response.header(HttpHeaders.ContentLength, fileSize.toString())
                     call.respondOutputStream(contentType = ContentType.parse(mimeType)) {
-                        cr.openInputStream(fileUri)?.use { input -> input.copyTo(this) }
+                        input.use { it.copyTo(this) }
                     }
                 }
             }

@@ -156,12 +156,14 @@ class NfcManager(private val context: Context) {
             }.getOrNull() ?: continue
 
             val handshake = runCatching {
+                val parsedFileCount = json.optInt("fileCount", 1)
+                require(parsedFileCount > 0) { "Invalid fileCount: $parsedFileCount" }
                 PeerHandshake(
                     ip        = json.getString("ip"),
                     port      = json.getInt("port"),
                     token     = json.getString("token"),
                     lang      = json.optString("lang", "en"),
-                    fileCount = json.optInt("fileCount", 1)
+                    fileCount = parsedFileCount
                 )
             }.getOrNull() ?: continue
 
