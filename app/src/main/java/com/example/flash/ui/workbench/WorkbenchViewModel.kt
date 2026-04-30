@@ -98,7 +98,7 @@ class WorkbenchViewModel(
                 selectedPhotos = it.selectedPhotos + uris
             )
         }
-        uris.forEach { uri -> prepareSenderHandshake(uri) }
+        uris.firstOrNull()?.let { uri -> prepareSenderHandshake(uri) }
     }
 
     fun onPhotoAddedToOrbit(uri: Uri) {
