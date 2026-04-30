@@ -102,6 +102,9 @@ private const val BLOB_NOISE_OFFSET_DP = 14f
 private const val BLOB_PADDING_DP      = 32f
 private val BLOB_SIZE_DP = (BLOB_BASE_RADIUS_DP * 2 + BLOB_NOISE_OFFSET_DP * 2 + BLOB_PADDING_DP).dp
 
+// Golden angle for orbit phase assignment (mirrored from PhotoOrbit)
+private val GOLDEN_ANGLE = (kotlin.math.PI * (3.0 - kotlin.math.sqrt(5.0))).toFloat()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkbenchScreen(
@@ -175,9 +178,19 @@ fun WorkbenchScreen(
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
+    var shouldStartGalleryTransition by remember { mutableStateOf(false) }
 
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
+
+    // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
+    LaunchedEffect(uiState.receivingPhotos) {
+        if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
+            delay(3000L)  // Let them orbit for a bit
+            shouldStartGalleryTransition = true
+            viewModel.startGalleryTransitionForReceivingPhotos()
+        }
+    }
 
     val screenExitY = remember { Animatable(0f) }
     var screenExitStarted by remember { mutableStateOf(false) }
@@ -230,21 +243,34 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── Orbiting selected photos ─────────────────────────────────────────
+        // ── Orbiting selected photos & received photos ─────────────────────────
         PhotoOrbit(
             photos           = uiState.selectedPhotos.toList(),
             coreCenter       = coreCenter,
+            receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
             shouldExit       = uiState.shouldExit
         )
 
-        // ── Received photos flying into gallery ──────────────────────────────
-        uiState.receivedPhotos.forEachIndexed { index, uri ->
-            ReceivedPhotoFlyer(
+        // ── Received photos materializing into orbit ─────────────────────────
+        uiState.receivingPhotos.forEachIndexed { index, uri ->
+            ReceivedPhotoMaterializeFlyer(
                 uri = uri,
                 coreCenter = coreCenter,
-                gridItemIndex = index
+                phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
+                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
             )
+        }
+
+        // ── Received photos flying from orbit into gallery ────────────────────
+        if (uiState.receivingPhotos.isNotEmpty() && shouldStartGalleryTransition) {
+            uiState.receivingPhotos.forEachIndexed { index, uri ->
+                ReceivedPhotoOrbitToGalleryFlyer(
+                    uri = uri,
+                    coreCenter = coreCenter,
+                    gridItemIndex = index
+                )
+            }
         }
 
         // ── Bottom area: two buttons or settings panel ───────────────────────
@@ -535,6 +561,124 @@ private fun SettingsPanel(
             Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+// ── Received photo materializing into orbit ────────────────────────────────────
+@Composable
+private fun ReceivedPhotoMaterializeFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    phaseOffset: Float
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(1500, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+    if (progress >= 1f) return  // Animation complete, now in orbit via PhotoOrbit
+
+    // Phase 1 (0-0.15): Materialize with scale pulse at blob center
+    val pulsePhase = (progress / 0.15f).coerceIn(0f, 1f)
+    val pulseScale = if (pulsePhase < 0.5f) {
+        lerp(0f, 1.2f, pulsePhase * 2f)
+    } else {
+        lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
+    }
+
+    // Phase 2 (0.15-1): Fly outward to orbit position
+    val flightPhase = ((progress - 0.15f) / 0.85f).coerceIn(0f, 1f)
+
+    val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
+    val orbitX = coreCenter.x + baseOrbitRadiusPx * kotlin.math.cos(phaseOffset)
+    val orbitY = coreCenter.y + baseOrbitRadiusPx * kotlin.math.sin(phaseOffset)
+
+    val currentScale = if (progress < 0.15f) pulseScale else 1f
+    val x = lerp(coreCenter.x, orbitX, flightPhase)
+    val y = lerp(coreCenter.y, orbitY, flightPhase)
+
+    val photoSizeDp = 56.dp
+    val photoSizePx = with(density) { photoSizeDp.toPx() }
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(photoSizeDp)
+            .offset {
+                IntOffset(
+                    (x - photoSizePx / 2f).roundToInt(),
+                    (y - photoSizePx / 2f).roundToInt()
+                )
+            }
+            .graphicsLayer {
+                scaleX = currentScale
+                scaleY = currentScale
+                translationZ = 3f  // On top during flight
+            }
+            .clip(RoundedCornerShape(8.dp))
+    )
+}
+
+// ── Received photo flying from orbit into gallery ─────────────────────────────
+@Composable
+private fun ReceivedPhotoOrbitToGalleryFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    gridItemIndex: Int
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(2000, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+    if (progress >= 1f) return  // Animation complete, now in gallery
+
+    val gridItemSizeDp = 100.dp
+    val paddingDp = 8.dp
+    val gapDp = 4.dp
+    val col = gridItemIndex % 3
+    val row = gridItemIndex / 3
+
+    val targetX = with(density) {
+        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+    val targetY = with(density) {
+        paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+
+    // Start from current orbit position (roughly at base radius)
+    val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
+    val orbitX = coreCenter.x + baseOrbitRadiusPx
+    val orbitY = coreCenter.y
+
+    // Fly from orbit to gallery position
+    val x = lerp(orbitX, targetX, progress)
+    val y = lerp(orbitY, targetY, progress)
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(gridItemSizeDp)
+            .offset {
+                IntOffset(
+                    (x - gridItemSizeDp.toPx() / 2f).roundToInt(),
+                    (y - gridItemSizeDp.toPx() / 2f).roundToInt()
+                )
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .graphicsLayer {
+                translationZ = 1f  // Z1 throughout flight
+            }
+    )
 }
 
 // ── Received photo flying into gallery ──────────────────────────────────────────

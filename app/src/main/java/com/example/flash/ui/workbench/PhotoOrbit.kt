@@ -54,6 +54,7 @@ fun PhotoOrbit(
     photos: List<Uri>,
     coreCenter: Offset,
     modifier: Modifier = Modifier,
+    receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
     shouldExit: Boolean = false
 ) {
@@ -100,8 +101,9 @@ fun PhotoOrbit(
     var nextPhaseIndex by remember { mutableIntStateOf(0) }
 
     val successPulse = remember { Animatable(0f) }
-    LaunchedEffect(transferProgress) {
-        if (transferProgress >= 1f && successPulse.value == 0f) {
+    LaunchedEffect(transferProgress, receivingPhotos) {
+        // Trigger success animation when transfer completes OR when receiving photos arrive
+        if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
             // Scale up (bloom phase)
             successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
             // Scale down to zero + move to center (collapse phase)
@@ -109,8 +111,9 @@ fun PhotoOrbit(
         }
     }
 
-    LaunchedEffect(photos) {
-        photos.forEach { uri ->
+    LaunchedEffect(photos, receivingPhotos) {
+        val allPhotos = (photos + receivingPhotos).distinct()
+        allPhotos.forEach { uri ->
             if (uri !in visiblePhotos) {
                 visiblePhotos.add(uri)
             }
@@ -119,7 +122,7 @@ fun PhotoOrbit(
                 nextPhaseIndex++
             }
         }
-        visiblePhotos.filter { it !in photos && it !in exitingPhotos }.forEach { uri ->
+        visiblePhotos.filter { it !in allPhotos && it !in exitingPhotos }.forEach { uri ->
             exitingPhotos.add(uri)
         }
     }
@@ -131,6 +134,7 @@ fun PhotoOrbit(
             key(uri) {
                 val phaseOffset = phaseMap[uri] ?: 0f
                 val isExiting = uri in exitingPhotos || shouldExit
+                val isReceiving = uri in receivingPhotos
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -142,7 +146,8 @@ fun PhotoOrbit(
                     photoSizeDp = photoSizeDp,
                     photoSizePx = photoSizePx,
                     isExiting = isExiting,
-                    successProgress = if (isExiting) 0f else successPulse.value,
+                    isReceiving = isReceiving,
+                    successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
                     onExitComplete = {
                         visiblePhotos.remove(uri)
                         exitingPhotos.remove(uri)
@@ -166,6 +171,7 @@ private fun OrbitPhotoItem(
     photoSizeDp: androidx.compose.ui.unit.Dp,
     photoSizePx: Float,
     isExiting: Boolean,
+    isReceiving: Boolean = false,
     successProgress: Float = 0f,
     onExitComplete: () -> Unit
 ) {
@@ -173,7 +179,12 @@ private fun OrbitPhotoItem(
     val exitProgress  = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
+        // Skip entry animation for receiving photos — they're animated in separately
+        if (!isReceiving) {
+            entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
+        } else {
+            entryProgress.snapTo(1f)  // Receiving photos start fully visible in orbit
+        }
     }
 
     LaunchedEffect(isExiting) {

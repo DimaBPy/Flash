@@ -39,7 +39,8 @@ data class WorkbenchUiState(
     val crystallizedPhotoUri: Uri? = null,
     val showRipple: Boolean      = false,
     val shouldExit: Boolean      = false,
-    val receivedPhotos: List<Uri> = emptyList()
+    val receivedPhotos: List<Uri> = emptyList(),
+    val receivingPhotos: List<Uri> = emptyList()
 )
 
 class WorkbenchViewModel(
@@ -175,7 +176,7 @@ class WorkbenchViewModel(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivedPhotos = fileUris
+                        receivingPhotos = fileUris
                     )
                 }
             }
@@ -192,19 +193,24 @@ class WorkbenchViewModel(
         _uiState.update { it.copy(showRipple = false, isReceiving = false, transferProgress = 0f) }
         transferRepository.reset()
         currentPort = 0
+    }
 
-        // After animation completes (~2 seconds), finalize received photos
-        viewModelScope.launch {
-            delay(2100L)  // Animation is 2000ms, add small buffer
-            val received = _uiState.value.receivedPhotos
-            if (received.isNotEmpty()) {
-                _uiState.update {
-                    it.copy(
-                        photos = (it.photos + received).distinct(),
-                        receivedPhotos = emptyList()
-                    )
-                }
+    fun onReceivingPhotosReadyForGallery() {
+        val receiving = _uiState.value.receivingPhotos
+        if (receiving.isNotEmpty()) {
+            _uiState.update {
+                it.copy(
+                    photos = (it.photos + receiving).distinct(),
+                    receivingPhotos = emptyList()
+                )
             }
+        }
+    }
+
+    fun startGalleryTransitionForReceivingPhotos() {
+        viewModelScope.launch {
+            delay(2100L)  // Wait for gallery flight animation to complete
+            onReceivingPhotosReadyForGallery()
         }
     }
 
