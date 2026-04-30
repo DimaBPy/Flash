@@ -92,7 +92,13 @@ class WorkbenchViewModel(
 
     /** Appends manually-picked URIs (from the "+" FAB) to the existing list. */
     fun onPhotosSelected(uris: List<Uri>) {
-        _uiState.update { it.copy(photos = (it.photos + uris).distinct()) }
+        _uiState.update {
+            it.copy(
+                photos = (it.photos + uris).distinct(),
+                selectedPhotos = it.selectedPhotos + uris
+            )
+        }
+        uris.forEach { uri -> prepareSenderHandshake(uri) }
     }
 
     fun onPhotoAddedToOrbit(uri: Uri) {

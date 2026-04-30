@@ -71,7 +71,7 @@ fun MotherCore(
         initialValue  = 0f,
         targetValue   = 1000f,
         animationSpec = infiniteRepeatable(
-            animation = tween(8_000, easing = LinearEasing),
+            animation = tween(2_700, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label         = "time"

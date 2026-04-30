@@ -61,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -198,12 +199,15 @@ fun WorkbenchScreen(
     // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ── Sliding content (everything except MotherCore) ───────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationY = screenExitY.value }
+                .background(MaterialTheme.colorScheme.background)
+                .systemBarsPadding()
+        ) {
         // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
@@ -213,7 +217,6 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
-                .graphicsLayer { translationY = screenExitY.value }
         ) {
             items(uiState.photos) { uri ->
                 PhotoGridItem(
@@ -227,38 +230,16 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── MotherCore at top ────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .onGloballyPositioned { coords ->
-                    val pos = coords.positionInParent()
-                    val sz  = coords.size
-                    coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
-                }
-        ) {
-            MotherCore(
-                progress     = uiState.transferProgress,
-                isReceiving  = uiState.isReceiving,
-                shouldExit   = uiState.shouldExit,
-                cutoutOffset = cutoutOffset,
-                backdrop     = backdrop,
-                onAnimationComplete = { (context as? android.app.Activity)?.finish() }
-            )
-        }
-
         // ── Orbiting selected photos ─────────────────────────────────────────
         PhotoOrbit(
-            photos     = uiState.selectedPhotos.toList(),
-            coreCenter = coreCenter.copy(y = coreCenter.y + screenExitY.value),
-            modifier   = Modifier.graphicsLayer { translationY = screenExitY.value }
+            photos      = uiState.selectedPhotos.toList(),
+            coreCenter  = coreCenter,
+            shouldExit  = uiState.shouldExit
         )
 
         // ── Bottom area: two buttons or settings panel ───────────────────────
         SharedTransitionLayout(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .graphicsLayer { translationY = screenExitY.value }
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             AnimatedContent(
                 targetState = showSettings,
@@ -341,7 +322,6 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 88.dp)
-                .graphicsLayer { translationY = screenExitY.value }
         ) {
             LiquidButton(
                 onClick      = { photoPicker.launch() },
@@ -361,6 +341,33 @@ fun WorkbenchScreen(
             RippleOverlay(
                 coreCenter = coreCenter,
                 onComplete = { viewModel.onRippleComplete() }
+            )
+        }
+        } // end sliding Box
+
+        // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .systemBarsPadding()
+                .graphicsLayer { translationY = -screenExitY.value }
+                .onGloballyPositioned { coords ->
+                    val pos = coords.positionInParent()
+                    val sz  = coords.size
+                    coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
+                }
+        ) {
+            MotherCore(
+                progress     = uiState.transferProgress,
+                isReceiving  = uiState.isReceiving,
+                shouldExit   = uiState.shouldExit,
+                cutoutOffset = cutoutOffset,
+                backdrop     = backdrop,
+                onAnimationComplete = {
+                    val activity = context as? android.app.Activity
+                    @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)
+                    activity?.finish()
+                }
             )
         }
     }
@@ -385,21 +392,21 @@ private fun <T> LiquidSegmentedButtonRow(
             val isLast = index == items.size - 1
             val isSelected = selectedItem == item
 
-            val shape = when {
-                isFirst && isLast -> RoundedCornerShape(12.dp)
-                isFirst -> RoundedCornerShape(
-                    topStart = 12.dp,
-                    bottomStart = 12.dp,
-                    topEnd = 2.dp,
-                    bottomEnd = 2.dp
-                )
-                isLast -> RoundedCornerShape(
-                    topStart = 2.dp,
-                    bottomStart = 2.dp,
-                    topEnd = 12.dp,
-                    bottomEnd = 12.dp
-                )
-                else -> RoundedCornerShape(2.dp)
+            val buttonShape: @Composable () -> Shape = when {
+                isFirst && isLast -> { { com.kyant.shapes.Capsule() } }
+                isFirst -> { {
+                    RoundedCornerShape(
+                        topStart = 50, bottomStart = 50,
+                        topEnd = 15,   bottomEnd = 15
+                    )
+                } }
+                isLast -> { {
+                    RoundedCornerShape(
+                        topStart = 15, bottomStart = 15,
+                        topEnd = 50,   bottomEnd = 50
+                    )
+                } }
+                else -> { { RoundedCornerShape(15) } }
             }
 
             LiquidButton(
@@ -407,9 +414,8 @@ private fun <T> LiquidSegmentedButtonRow(
                 backdrop = backdrop,
                 surfaceColor = if (isSelected) OceanAqua.copy(alpha = 0.45f) else OceanAqua.copy(alpha = 0.15f),
                 buttonHeight = 40.dp,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(shape),
+                shape = buttonShape,
+                modifier = Modifier.weight(1f),
                 isInteractive = true
             ) {
                 Text(
