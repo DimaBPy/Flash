@@ -15,7 +15,7 @@ sealed interface TransferState {
     object Idle : TransferState
     data class Serving(val port: Int, val token: String) : TransferState
     data class Downloading(val progress: Float) : TransferState
-    data class Complete(val receivedFile: File) : TransferState
+    data class Complete(val receivedFiles: List<File>) : TransferState
     data class Failed(val reason: String) : TransferState
 }
 
@@ -33,14 +33,20 @@ class TransferRepository(
 
     private var downloadJob: Job? = null
 
-    suspend fun startServing(token: String, fileUri: Uri, context: Context): Int {
+    val servingFileCount: Int get() = server.fileCount
+
+    suspend fun startServing(token: String, uris: List<Uri>, context: Context): Int {
         _transferState.value = TransferState.Idle
-        val port = server.start(token, fileUri, context)
+        val port = server.start(token, uris, context)
         _transferState.value = TransferState.Serving(port, token)
         return port
     }
 
-    fun startDownload(ip: String, port: Int, token: String, context: Context) {
+    fun addFileToServing(token: String, uri: Uri) {
+        server.addUri(token, uri)
+    }
+
+    fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
         downloadJob?.cancel()
         downloadJob = scope.launch {
             try {
@@ -48,14 +54,13 @@ class TransferRepository(
                 _transferState.value = TransferState.Downloading(0f)
 
                 val destDir = File(context.cacheDir, "transfers")
-                val file = client.download(ip, port, token, destDir) { progress ->
+                val files = client.downloadAll(ip, port, token, fileCount, destDir) { progress ->
                     _progressFlow.value = progress
                     _transferState.value = TransferState.Downloading(progress)
                 }
 
-                _transferState.value = TransferState.Complete(file)
+                _transferState.value = TransferState.Complete(files)
             } catch (e: CancellationException) {
-                // Cancelled intentionally — leave state as Idle (set by stopAll)
                 throw e
             } catch (e: Exception) {
                 _transferState.value = TransferState.Failed(e.message ?: "Unknown error")

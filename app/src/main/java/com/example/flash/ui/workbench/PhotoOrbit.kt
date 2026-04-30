@@ -2,11 +2,11 @@ package com.example.flash.ui.workbench
 
 import android.net.Uri
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -17,46 +17,51 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.Outline
-import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
-import com.example.flash.ui.core.PerlinNoise
-import com.example.flash.ui.core.buildBlobPath
+import com.example.flash.ui.core.updateBlobPath
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
+import kotlin.math.abs
+
+// Golden angle — each new photo lands at a position that never bunches with others,
+// regardless of how many photos are added over time.
+private val GOLDEN_ANGLE = (PI * (3.0 - sqrt(5.0))).toFloat()
 
 @Composable
 fun PhotoOrbit(
     photos: List<Uri>,
     coreCenter: Offset,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    receivingPhotos: List<Uri> = emptyList(),
+    transferProgress: Float = 0f,
+    shouldExit: Boolean = false
 ) {
-    if (photos.isEmpty()) return
-
     val density = LocalDensity.current
 
-    val infiniteTransition = rememberInfiniteTransition(label = "orbit")
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "orbit")
 
-    // Orbit angle — full revolution in 8 s
     val time by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = (2 * PI).toFloat(),
@@ -67,17 +72,13 @@ fun PhotoOrbit(
         label = "orbit_time"
     )
 
-    // Slow blob morph clock
     val blobTime by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = 1000f,
-        animationSpec = infiniteRepeatable(
-            tween(1_000_000, easing = LinearEasing)
-        ),
+        animationSpec = infiniteRepeatable(tween(1_000_000, easing = LinearEasing)),
         label = "blob_time"
     )
 
-    // Low-frequency radial drift
     val radialDrift by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = with(density) { 8.dp.toPx() },
@@ -89,23 +90,68 @@ fun PhotoOrbit(
     )
 
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
-    val photoSizeDp       = 56.dp
-    val photoSizePx       = with(density) { photoSizeDp.toPx() }
+    val photoSizeDp = 56.dp
+    val photoSizePx = with(density) { photoSizeDp.toPx() }
+
+    val visiblePhotos = remember { mutableStateListOf<Uri>() }
+    val exitingPhotos = remember { mutableStateSetOf<Uri>() }
+    // Each URI gets a golden-angle phase assigned once on entry — never recalculated,
+    // so adding a new photo cannot shift existing photos' positions.
+    val phaseMap = remember { mutableStateMapOf<Uri, Float>() }
+    var nextPhaseIndex by remember { mutableIntStateOf(0) }
+
+    val successPulse = remember { Animatable(0f) }
+    LaunchedEffect(transferProgress, receivingPhotos) {
+        if (transferProgress < 1f && successPulse.value != 0f) {
+            successPulse.snapTo(0f)  // Reset for next transfer
+        } else if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
+            successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
+            successPulse.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 180f))
+        }
+    }
+
+    LaunchedEffect(photos, receivingPhotos) {
+        val allPhotos = (photos + receivingPhotos).distinct()
+        allPhotos.forEach { uri ->
+            if (uri !in visiblePhotos) {
+                visiblePhotos.add(uri)
+            }
+            if (uri !in phaseMap) {
+                phaseMap[uri] = nextPhaseIndex * GOLDEN_ANGLE
+                nextPhaseIndex++
+            }
+        }
+        visiblePhotos.filter { it !in allPhotos && it !in exitingPhotos }.forEach { uri ->
+            exitingPhotos.add(uri)
+        }
+    }
+
+    if (visiblePhotos.isEmpty()) return
 
     Box(modifier = modifier.fillMaxSize()) {
-        photos.forEachIndexed { index, uri ->
+        visiblePhotos.toList().forEach { uri ->
             key(uri) {
+                val phaseOffset = phaseMap[uri] ?: 0f
+                val isExiting = uri in exitingPhotos || shouldExit
+                val isReceiving = uri in receivingPhotos
                 OrbitPhotoItem(
                     uri = uri,
-                    index = index,
-                    totalPhotos = photos.size,
+                    phaseOffset = phaseOffset,
                     coreCenter = coreCenter,
                     time = time,
                     blobTime = blobTime,
                     baseOrbitRadiusPx = baseOrbitRadiusPx,
                     radialDrift = radialDrift,
                     photoSizeDp = photoSizeDp,
-                    photoSizePx = photoSizePx
+                    photoSizePx = photoSizePx,
+                    isExiting = isExiting,
+                    isReceiving = isReceiving,
+                    successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
+                    onExitComplete = {
+                        visiblePhotos.remove(uri)
+                        exitingPhotos.remove(uri)
+                        phaseMap.remove(uri)
+                    }
                 )
             }
         }
@@ -115,32 +161,59 @@ fun PhotoOrbit(
 @Composable
 private fun OrbitPhotoItem(
     uri: Uri,
-    index: Int,
-    totalPhotos: Int,
+    phaseOffset: Float,
     coreCenter: Offset,
     time: Float,
     blobTime: Float,
     baseOrbitRadiusPx: Float,
     radialDrift: Float,
     photoSizeDp: androidx.compose.ui.unit.Dp,
-    photoSizePx: Float
+    photoSizePx: Float,
+    isExiting: Boolean,
+    isReceiving: Boolean = false,
+    successProgress: Float = 0f,
+    onExitComplete: () -> Unit
 ) {
     val entryProgress = remember { Animatable(0f) }
+    val exitProgress  = remember { Animatable(0f) }
+
     LaunchedEffect(Unit) {
-        entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
+        // Skip entry animation for receiving photos — they're animated in separately
+        if (!isReceiving) {
+            entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
+        } else {
+            entryProgress.snapTo(1f)  // Receiving photos start fully visible in orbit
+        }
     }
 
-    val phaseOffset = (index.toFloat() / totalPhotos) * (2 * PI).toFloat()
-    val orbitR = baseOrbitRadiusPx + radialDrift
+    LaunchedEffect(isExiting) {
+        if (isExiting && exitProgress.value == 0f) {
+            exitProgress.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
+            onExitComplete()
+        }
+    }
 
+    val orbitR = baseOrbitRadiusPx + radialDrift
     val orbitX = coreCenter.x + orbitR * cos(time + phaseOffset)
     val orbitY = coreCenter.y + orbitR * sin(time + phaseOffset)
 
     val ep = entryProgress.value
-    val x = lerp(coreCenter.x, orbitX, ep)
-    val y = lerp(coreCenter.y, orbitY, ep)
+    val xp = exitProgress.value
+    val sp = successProgress
 
-    val photoBlobTime = (blobTime + index * 137f).toDouble()
+    // Success animation: 0→0.5 = scale bloom up, 0.5→1 = scale down to zero + move to center
+    val successScale = when {
+        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)  // Bloom up
+        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)  // Collapse to zero
+    }
+    val successX = if (sp > 0.5f) lerp(orbitX, coreCenter.x, (sp - 0.5f) * 2f) else orbitX
+    val successY = if (sp > 0.5f) lerp(orbitY, coreCenter.y, (sp - 0.5f) * 2f) else orbitY
+
+    val x     = lerp(lerp(coreCenter.x, successX, ep), coreCenter.x, xp)
+    val y     = lerp(lerp(coreCenter.y, successY, ep), coreCenter.y, xp)
+    val scale = lerp(ep * successScale, 0f, xp)
+
+    val photoBlobTime = (blobTime + phaseOffset * 137f).toDouble()
 
     AsyncImage(
         model = uri,
@@ -155,14 +228,32 @@ private fun OrbitPhotoItem(
                 )
             }
             .graphicsLayer {
-                scaleX = ep
-                scaleY = ep
-                alpha = ep
+                scaleX = scale
+                scaleY = scale
+                alpha  = scale
             }
             .drawWithCache {
                 val path = Path()
                 onDrawWithContent {
-                    com.example.flash.ui.core.updateBlobPath(
+                    // Bloom glow during success pulse
+                    if (sp > 0f && sp < 1f) {
+                        val bloomAlpha = (1f - abs(sp - 0.5f) * 2f) * 0.4f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.6f * bloomAlpha),
+                                    Color.White.copy(alpha = 0.2f * bloomAlpha),
+                                    Color.Transparent
+                                ),
+                                center = Offset(size.width / 2f, size.height / 2f),
+                                radius = size.width * 0.8f
+                            ),
+                            radius = size.width * 0.8f,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
+                    }
+
+                    updateBlobPath(
                         path     = path,
                         cx       = size.width  / 2f,
                         cy       = size.height / 2f,

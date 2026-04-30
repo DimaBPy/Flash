@@ -61,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -92,6 +93,7 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -100,6 +102,9 @@ private const val BLOB_BASE_RADIUS_DP  = 60f
 private const val BLOB_NOISE_OFFSET_DP = 14f
 private const val BLOB_PADDING_DP      = 32f
 private val BLOB_SIZE_DP = (BLOB_BASE_RADIUS_DP * 2 + BLOB_NOISE_OFFSET_DP * 2 + BLOB_PADDING_DP).dp
+
+// Golden angle for orbit phase assignment (mirrored from PhotoOrbit)
+private val GOLDEN_ANGLE = (kotlin.math.PI * (3.0 - kotlin.math.sqrt(5.0))).toFloat()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,9 +179,19 @@ fun WorkbenchScreen(
 
     var coreCenter   by remember { mutableStateOf(Offset.Zero) }
     var showSettings by remember { mutableStateOf(false) }
+    var shouldStartGalleryTransition by remember { mutableStateOf(false) }
 
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
+
+    // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
+    LaunchedEffect(uiState.receivingPhotos) {
+        if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
+            delay(3000L)  // Let them orbit for a bit
+            shouldStartGalleryTransition = true
+            viewModel.startGalleryTransitionForReceivingPhotos()
+        }
+    }
 
     val screenExitY = remember { Animatable(0f) }
     var screenExitStarted by remember { mutableStateOf(false) }
@@ -198,12 +213,15 @@ fun WorkbenchScreen(
     // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding()
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ── Sliding content (everything except MotherCore) ───────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationY = screenExitY.value }
+                .background(MaterialTheme.colorScheme.background)
+                .systemBarsPadding()
+        ) {
         // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
@@ -213,7 +231,6 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .layerBackdrop(backdrop)
-                .graphicsLayer { translationY = screenExitY.value }
         ) {
             items(uiState.photos) { uri ->
                 PhotoGridItem(
@@ -227,38 +244,39 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── MotherCore at top ────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .onGloballyPositioned { coords ->
-                    val pos = coords.positionInParent()
-                    val sz  = coords.size
-                    coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
-                }
-        ) {
-            MotherCore(
-                progress     = uiState.transferProgress,
-                isReceiving  = uiState.isReceiving,
-                shouldExit   = uiState.shouldExit,
-                cutoutOffset = cutoutOffset,
-                backdrop     = backdrop,
-                onAnimationComplete = { (context as? android.app.Activity)?.finish() }
+        // ── Orbiting selected photos & received photos ─────────────────────────
+        PhotoOrbit(
+            photos           = uiState.selectedPhotos.toList(),
+            coreCenter       = coreCenter,
+            receivingPhotos  = uiState.receivingPhotos,
+            transferProgress = uiState.transferProgress,
+            shouldExit       = uiState.shouldExit
+        )
+
+        // ── Received photos materializing into orbit ─────────────────────────
+        uiState.receivingPhotos.forEachIndexed { index, uri ->
+            ReceivedPhotoMaterializeFlyer(
+                uri = uri,
+                coreCenter = coreCenter,
+                phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
+                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
             )
         }
 
-        // ── Orbiting selected photos ─────────────────────────────────────────
-        PhotoOrbit(
-            photos     = uiState.selectedPhotos.toList(),
-            coreCenter = coreCenter.copy(y = coreCenter.y + screenExitY.value),
-            modifier   = Modifier.graphicsLayer { translationY = screenExitY.value }
-        )
+        // ── Received photos flying from orbit into gallery ────────────────────
+        if (uiState.receivingPhotos.isNotEmpty() && shouldStartGalleryTransition) {
+            uiState.receivingPhotos.forEachIndexed { index, uri ->
+                ReceivedPhotoOrbitToGalleryFlyer(
+                    uri = uri,
+                    coreCenter = coreCenter,
+                    gridItemIndex = index
+                )
+            }
+        }
 
         // ── Bottom area: two buttons or settings panel ───────────────────────
         SharedTransitionLayout(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .graphicsLayer { translationY = screenExitY.value }
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             AnimatedContent(
                 targetState = showSettings,
@@ -341,7 +359,6 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 24.dp, bottom = 88.dp)
-                .graphicsLayer { translationY = screenExitY.value }
         ) {
             LiquidButton(
                 onClick      = { photoPicker.launch() },
@@ -361,6 +378,33 @@ fun WorkbenchScreen(
             RippleOverlay(
                 coreCenter = coreCenter,
                 onComplete = { viewModel.onRippleComplete() }
+            )
+        }
+        } // end sliding Box
+
+        // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .systemBarsPadding()
+                .graphicsLayer { translationY = -screenExitY.value }
+                .onGloballyPositioned { coords ->
+                    val pos = coords.positionInParent()
+                    val sz  = coords.size
+                    coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
+                }
+        ) {
+            MotherCore(
+                progress     = uiState.transferProgress,
+                isReceiving  = uiState.isReceiving,
+                shouldExit   = uiState.shouldExit,
+                cutoutOffset = cutoutOffset,
+                backdrop     = backdrop,
+                onAnimationComplete = {
+                    val activity = context as? android.app.Activity
+                    @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)
+                    activity?.finish()
+                }
             )
         }
     }
@@ -385,21 +429,21 @@ private fun <T> LiquidSegmentedButtonRow(
             val isLast = index == items.size - 1
             val isSelected = selectedItem == item
 
-            val shape = when {
-                isFirst && isLast -> RoundedCornerShape(12.dp)
-                isFirst -> RoundedCornerShape(
-                    topStart = 12.dp,
-                    bottomStart = 12.dp,
-                    topEnd = 2.dp,
-                    bottomEnd = 2.dp
-                )
-                isLast -> RoundedCornerShape(
-                    topStart = 2.dp,
-                    bottomStart = 2.dp,
-                    topEnd = 12.dp,
-                    bottomEnd = 12.dp
-                )
-                else -> RoundedCornerShape(2.dp)
+            val buttonShape: @Composable () -> Shape = when {
+                isFirst && isLast -> { { com.kyant.shapes.Capsule() } }
+                isFirst -> { {
+                    RoundedCornerShape(
+                        topStart = 50, bottomStart = 50,
+                        topEnd = 15,   bottomEnd = 15
+                    )
+                } }
+                isLast -> { {
+                    RoundedCornerShape(
+                        topStart = 15, bottomStart = 15,
+                        topEnd = 50,   bottomEnd = 50
+                    )
+                } }
+                else -> { { RoundedCornerShape(15) } }
             }
 
             LiquidButton(
@@ -407,9 +451,8 @@ private fun <T> LiquidSegmentedButtonRow(
                 backdrop = backdrop,
                 surfaceColor = if (isSelected) OceanAqua.copy(alpha = 0.45f) else OceanAqua.copy(alpha = 0.15f),
                 buttonHeight = 40.dp,
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(shape),
+                shape = buttonShape,
+                modifier = Modifier.weight(1f),
                 isInteractive = true
             ) {
                 Text(
@@ -519,6 +562,195 @@ private fun SettingsPanel(
             Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+// ── Received photo materializing into orbit ────────────────────────────────────
+@Composable
+private fun ReceivedPhotoMaterializeFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    phaseOffset: Float
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(1500, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+    if (progress >= 1f) return  // Animation complete, now in orbit via PhotoOrbit
+
+    // Phase 1 (0-0.15): Materialize with scale pulse at blob center
+    val pulsePhase = (progress / 0.15f).coerceIn(0f, 1f)
+    val pulseScale = if (pulsePhase < 0.5f) {
+        lerp(0f, 1.2f, pulsePhase * 2f)
+    } else {
+        lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
+    }
+
+    // Phase 2 (0.15-1): Fly outward to orbit position
+    val flightPhase = ((progress - 0.15f) / 0.85f).coerceIn(0f, 1f)
+
+    val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
+    val orbitX = coreCenter.x + baseOrbitRadiusPx * kotlin.math.cos(phaseOffset)
+    val orbitY = coreCenter.y + baseOrbitRadiusPx * kotlin.math.sin(phaseOffset)
+
+    val currentScale = if (progress < 0.15f) pulseScale else 1f
+    val x = lerp(coreCenter.x, orbitX, flightPhase)
+    val y = lerp(coreCenter.y, orbitY, flightPhase)
+
+    val photoSizeDp = 56.dp
+    val photoSizePx = with(density) { photoSizeDp.toPx() }
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(photoSizeDp)
+            .offset {
+                IntOffset(
+                    (x - photoSizePx / 2f).roundToInt(),
+                    (y - photoSizePx / 2f).roundToInt()
+                )
+            }
+            .graphicsLayer {
+                scaleX = currentScale
+                scaleY = currentScale
+            }
+            .zIndex(3f)
+            .clip(RoundedCornerShape(8.dp))
+    )
+}
+
+// ── Received photo flying from orbit into gallery ─────────────────────────────
+@Composable
+private fun ReceivedPhotoOrbitToGalleryFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    gridItemIndex: Int
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(2000, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+    if (progress >= 1f) return  // Animation complete, now in gallery
+
+    val gridItemSizeDp = 100.dp
+    val paddingDp = 8.dp
+    val gapDp = 4.dp
+    val col = gridItemIndex % 3
+    val row = gridItemIndex / 3
+
+    val targetX = with(density) {
+        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+    val targetY = with(density) {
+        paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+
+    // Start from current orbit position (roughly at base radius)
+    val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
+    val orbitX = coreCenter.x + baseOrbitRadiusPx
+    val orbitY = coreCenter.y
+
+    // Fly from orbit to gallery position
+    val x = lerp(orbitX, targetX, progress)
+    val y = lerp(orbitY, targetY, progress)
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(gridItemSizeDp)
+            .offset {
+                IntOffset(
+                    (x - gridItemSizeDp.toPx() / 2f).roundToInt(),
+                    (y - gridItemSizeDp.toPx() / 2f).roundToInt()
+                )
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .zIndex(1f)
+    )
+}
+
+// ── Received photo flying into gallery ──────────────────────────────────────────
+@Composable
+private fun ReceivedPhotoFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    gridItemIndex: Int
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(2000, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+
+    // Only render while animating; once complete, photo is in gallery at Z0
+    if (progress >= 1f) return
+
+    val gridItemSizeDp = 100.dp
+    val paddingDp = 8.dp
+    val gapDp = 4.dp
+    val col = gridItemIndex % 3
+    val row = gridItemIndex / 3
+
+    val targetX = with(density) {
+        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+    val targetY = with(density) {
+        paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+
+    // Phase 1 (0-0.2): Materialize with scale pulse + brief orbit glow
+    val pulsePhase = (progress / 0.2f).coerceIn(0f, 1f)
+    val pulseScale = if (pulsePhase < 0.5f) {
+        lerp(0f, 1.2f, pulsePhase * 2f)
+    } else {
+        lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
+    }
+
+    // Phase 2 (0.2-0.4): Move horizontally to clear blob
+    val horizontalPhase = ((progress - 0.2f) / 0.2f).coerceIn(0f, 1f)
+    val horizontalDir = if (targetX < coreCenter.x) -1f else 1f
+    val clearDistance = with(density) { 150.dp.toPx() }
+    val clearX = coreCenter.x + (clearDistance * horizontalDir * horizontalPhase)
+
+    // Phase 3 (0.4-1): Fly to target grid position at Z1
+    val flightPhase = ((progress - 0.4f) / 0.6f).coerceIn(0f, 1f)
+    val x = lerp(clearX, targetX, flightPhase)
+    val y = lerp(coreCenter.y, targetY, flightPhase)
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(gridItemSizeDp)
+            .offset {
+                IntOffset(
+                    (x - gridItemSizeDp.toPx() / 2f).roundToInt(),
+                    (y - gridItemSizeDp.toPx() / 2f).roundToInt()
+                )
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .graphicsLayer {
+                val displayScale = if (progress < 0.2f) pulseScale else 1f
+                scaleX = displayScale
+                scaleY = displayScale
+            }
+            .zIndex(1f)
+    )
 }
 
 // ── Photo grid item ─────────────────────────────────────────────────────────────
