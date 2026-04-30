@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -191,6 +192,20 @@ class WorkbenchViewModel(
         _uiState.update { it.copy(showRipple = false, isReceiving = false, transferProgress = 0f) }
         transferRepository.reset()
         currentPort = 0
+
+        // After animation completes (~2 seconds), finalize received photos
+        viewModelScope.launch {
+            delay(2100L)  // Animation is 2000ms, add small buffer
+            val received = _uiState.value.receivedPhotos
+            if (received.isNotEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        photos = (it.photos + received).distinct(),
+                        receivedPhotos = emptyList()
+                    )
+                }
+            }
+        }
     }
 
     fun onExitRequested() {

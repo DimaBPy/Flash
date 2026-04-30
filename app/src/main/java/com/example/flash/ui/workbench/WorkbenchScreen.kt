@@ -238,6 +238,15 @@ fun WorkbenchScreen(
             shouldExit       = uiState.shouldExit
         )
 
+        // ── Received photos flying into gallery ──────────────────────────────
+        uiState.receivedPhotos.forEachIndexed { index, uri ->
+            ReceivedPhotoFlyer(
+                uri = uri,
+                coreCenter = coreCenter,
+                gridItemIndex = index
+            )
+        }
+
         // ── Bottom area: two buttons or settings panel ───────────────────────
         SharedTransitionLayout(
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -526,6 +535,67 @@ private fun SettingsPanel(
             Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+// ── Received photo flying into gallery ──────────────────────────────────────────
+@Composable
+private fun ReceivedPhotoFlyer(
+    uri: Uri,
+    coreCenter: Offset,
+    gridItemIndex: Int
+) {
+    val density = LocalDensity.current
+    val animProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        animProgress.animateTo(1f, tween(2000, easing = FastOutSlowInEasing))
+    }
+
+    val progress = animProgress.value
+
+    val gridItemSizeDp = 100.dp
+    val paddingDp = 8.dp
+    val gapDp = 4.dp
+    val col = gridItemIndex % 3
+    val row = gridItemIndex / 3
+
+    val targetX = with(density) {
+        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+    val targetY = with(density) {
+        paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
+    }
+
+    // Phase 1 (0-0.3): Move horizontally to clear blob
+    val horizontalPhase = (progress / 0.3f).coerceIn(0f, 1f)
+    val horizontalDir = if (targetX < coreCenter.x) -1f else 1f
+    val clearDistance = with(density) { 150.dp.toPx() }
+    val clearX = coreCenter.x + (clearDistance * horizontalDir * horizontalPhase)
+    val zHorizontal = lerp(3f, 1f, horizontalPhase)
+
+    // Phase 2 (0.3-1): Fly to target grid position
+    val flightPhase = ((progress - 0.3f) / 0.7f).coerceIn(0f, 1f)
+    val x = lerp(clearX, targetX, flightPhase)
+    val y = lerp(coreCenter.y, targetY, flightPhase)
+    val z = lerp(zHorizontal, 0f, flightPhase)
+
+    AsyncImage(
+        model = uri,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(gridItemSizeDp)
+            .offset {
+                IntOffset(
+                    (x - gridItemSizeDp.toPx() / 2f).roundToInt(),
+                    (y - gridItemSizeDp.toPx() / 2f).roundToInt()
+                )
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .graphicsLayer {
+                translationZ = z
+            }
+    )
 }
 
 // ── Photo grid item ─────────────────────────────────────────────────────────────
