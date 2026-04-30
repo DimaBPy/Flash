@@ -363,6 +363,62 @@ fun WorkbenchScreen(
     }
 }
 
+// ── Liquid glass segmented button row ──────────────────────────────────────
+@Composable
+private fun <T> LiquidSegmentedButtonRow(
+    items: List<T>,
+    selectedItem: T,
+    onItemSelected: (T) -> Unit,
+    backdrop: Backdrop,
+    label: @Composable (T) -> String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        items.forEachIndexed { index, item ->
+            val isFirst = index == 0
+            val isLast = index == items.size - 1
+            val isSelected = selectedItem == item
+
+            val shape = when {
+                isFirst && isLast -> RoundedCornerShape(12.dp)
+                isFirst -> RoundedCornerShape(
+                    topStart = 12.dp,
+                    bottomStart = 12.dp,
+                    topEnd = 2.dp,
+                    bottomEnd = 2.dp
+                )
+                isLast -> RoundedCornerShape(
+                    topStart = 2.dp,
+                    bottomStart = 2.dp,
+                    topEnd = 12.dp,
+                    bottomEnd = 12.dp
+                )
+                else -> RoundedCornerShape(2.dp)
+            }
+
+            LiquidButton(
+                onClick = { onItemSelected(item) },
+                backdrop = backdrop,
+                surfaceColor = if (isSelected) OceanAqua.copy(alpha = 0.45f) else OceanAqua.copy(alpha = 0.15f),
+                buttonHeight = 40.dp,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(shape),
+                isInteractive = true
+            ) {
+                Text(
+                    text = label(item),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
 // ── Settings panel: liquid glass bottom container ───────────────────────────
 @Composable
 private fun SettingsPanel(
@@ -442,30 +498,19 @@ private fun SettingsPanel(
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ThemeMode.entries.forEach { mode ->
-                        LiquidButton(
-                            onClick = { scope.launch { themeRepository.setThemeMode(mode) } },
-                            backdrop = backdrop,
-                            surfaceColor = if (themeMode == mode) OceanAqua.copy(alpha = 0.45f) else OceanAqua.copy(alpha = 0.15f),
-                            buttonHeight = 40.dp,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = when (mode) {
-                                    ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
-                                    ThemeMode.DARK   -> stringResource(R.string.theme_dark)
-                                    ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (themeMode == mode) Color.White else Color.White.copy(alpha = 0.6f)
-                            )
+                LiquidSegmentedButtonRow(
+                    items = ThemeMode.entries,
+                    selectedItem = themeMode,
+                    onItemSelected = { scope.launch { themeRepository.setThemeMode(it) } },
+                    backdrop = backdrop,
+                    label = { mode ->
+                        when (mode) {
+                            ThemeMode.LIGHT  -> stringResource(R.string.theme_light)
+                            ThemeMode.DARK   -> stringResource(R.string.theme_dark)
+                            ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
                         }
                     }
-                }
+                )
             }
 
             Spacer(Modifier.height(8.dp))
