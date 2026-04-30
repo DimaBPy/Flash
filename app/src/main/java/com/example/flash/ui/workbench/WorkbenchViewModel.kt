@@ -37,7 +37,8 @@ data class WorkbenchUiState(
     val isReceiving: Boolean     = false,
     val crystallizedPhotoUri: Uri? = null,
     val showRipple: Boolean      = false,
-    val shouldExit: Boolean      = false
+    val shouldExit: Boolean      = false,
+    val receivedPhotos: List<Uri> = emptyList()
 )
 
 class WorkbenchViewModel(
@@ -165,8 +166,16 @@ class WorkbenchViewModel(
     private fun onTransferStateChanged(state: TransferState) {
         when (state) {
             is TransferState.Complete -> {
+                val fileUris = state.receivedFiles.map { file ->
+                    android.net.Uri.fromFile(file)
+                }
                 _uiState.update {
-                    it.copy(nfcState = NfcUiState.Complete, transferProgress = 1f, showRipple = true)
+                    it.copy(
+                        nfcState = NfcUiState.Complete,
+                        transferProgress = 1f,
+                        showRipple = true,
+                        receivedPhotos = fileUris
+                    )
                 }
             }
             is TransferState.Failed -> {

@@ -232,9 +232,10 @@ fun WorkbenchScreen(
 
         // ── Orbiting selected photos ─────────────────────────────────────────
         PhotoOrbit(
-            photos      = uiState.selectedPhotos.toList(),
-            coreCenter  = coreCenter,
-            shouldExit  = uiState.shouldExit
+            photos           = uiState.selectedPhotos.toList(),
+            coreCenter       = coreCenter,
+            transferProgress = uiState.transferProgress,
+            shouldExit       = uiState.shouldExit
         )
 
         // ── Bottom area: two buttons or settings panel ───────────────────────

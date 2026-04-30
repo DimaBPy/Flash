@@ -36,11 +36,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
 import com.example.flash.ui.core.updateBlobPath
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.abs
 
 // Golden angle — each new photo lands at a position that never bunches with others,
 // regardless of how many photos are added over time.
@@ -51,6 +54,7 @@ fun PhotoOrbit(
     photos: List<Uri>,
     coreCenter: Offset,
     modifier: Modifier = Modifier,
+    transferProgress: Float = 0f,
     shouldExit: Boolean = false
 ) {
     val density = LocalDensity.current
@@ -95,6 +99,16 @@ fun PhotoOrbit(
     val phaseMap = remember { mutableStateMapOf<Uri, Float>() }
     var nextPhaseIndex by remember { mutableIntStateOf(0) }
 
+    val successPulse = remember { Animatable(0f) }
+    LaunchedEffect(transferProgress) {
+        if (transferProgress >= 1f && successPulse.value == 0f) {
+            // Scale up (bloom phase)
+            successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
+            // Scale down to zero + move to center (collapse phase)
+            successPulse.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 180f))
+        }
+    }
+
     LaunchedEffect(photos) {
         photos.forEach { uri ->
             if (uri !in visiblePhotos) {
@@ -116,6 +130,7 @@ fun PhotoOrbit(
         visiblePhotos.toList().forEach { uri ->
             key(uri) {
                 val phaseOffset = phaseMap[uri] ?: 0f
+                val isExiting = uri in exitingPhotos || shouldExit
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -126,7 +141,8 @@ fun PhotoOrbit(
                     radialDrift = radialDrift,
                     photoSizeDp = photoSizeDp,
                     photoSizePx = photoSizePx,
-                    isExiting = uri in exitingPhotos || shouldExit,
+                    isExiting = isExiting,
+                    successProgress = if (isExiting) 0f else successPulse.value,
                     onExitComplete = {
                         visiblePhotos.remove(uri)
                         exitingPhotos.remove(uri)
@@ -150,6 +166,7 @@ private fun OrbitPhotoItem(
     photoSizeDp: androidx.compose.ui.unit.Dp,
     photoSizePx: Float,
     isExiting: Boolean,
+    successProgress: Float = 0f,
     onExitComplete: () -> Unit
 ) {
     val entryProgress = remember { Animatable(0f) }
@@ -172,10 +189,19 @@ private fun OrbitPhotoItem(
 
     val ep = entryProgress.value
     val xp = exitProgress.value
+    val sp = successProgress
 
-    val x     = lerp(lerp(coreCenter.x, orbitX, ep), coreCenter.x, xp)
-    val y     = lerp(lerp(coreCenter.y, orbitY, ep), coreCenter.y, xp)
-    val scale = lerp(ep, 0f, xp)
+    // Success animation: 0→0.5 = scale bloom up, 0.5→1 = scale down to zero + move to center
+    val successScale = when {
+        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)  // Bloom up
+        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)  // Collapse to zero
+    }
+    val successX = if (sp > 0.5f) lerp(orbitX, coreCenter.x, (sp - 0.5f) * 2f) else orbitX
+    val successY = if (sp > 0.5f) lerp(orbitY, coreCenter.y, (sp - 0.5f) * 2f) else orbitY
+
+    val x     = lerp(lerp(coreCenter.x, successX, ep), coreCenter.x, xp)
+    val y     = lerp(lerp(coreCenter.y, successY, ep), coreCenter.y, xp)
+    val scale = lerp(ep * successScale, 0f, xp)
 
     val photoBlobTime = (blobTime + phaseOffset * 137f).toDouble()
 
@@ -199,6 +225,24 @@ private fun OrbitPhotoItem(
             .drawWithCache {
                 val path = Path()
                 onDrawWithContent {
+                    // Bloom glow during success pulse
+                    if (sp > 0f && sp < 1f) {
+                        val bloomAlpha = (1f - abs(sp - 0.5f) * 2f) * 0.4f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.6f * bloomAlpha),
+                                    Color.White.copy(alpha = 0.2f * bloomAlpha),
+                                    Color.Transparent
+                                ),
+                                center = Offset(size.width / 2f, size.height / 2f),
+                                radius = size.width * 0.8f
+                            ),
+                            radius = size.width * 0.8f,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
+                    }
+
                     updateBlobPath(
                         path     = path,
                         cx       = size.width  / 2f,
