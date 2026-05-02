@@ -70,6 +70,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
@@ -94,6 +95,8 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.util.lerp
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -429,21 +432,21 @@ private fun <T> LiquidSegmentedButtonRow(
             val isLast = index == items.size - 1
             val isSelected = selectedItem == item
 
-            val buttonShape: @Composable () -> Shape = when {
+            val buttonShape: () -> Shape = when {
                 isFirst && isLast -> { { com.kyant.shapes.Capsule() } }
                 isFirst -> { {
                     RoundedCornerShape(
-                        topStart = 50, bottomStart = 50,
-                        topEnd = 15,   bottomEnd = 15
+                        topStart = 50.dp, bottomStart = 50.dp,
+                        topEnd = 15.dp,   bottomEnd = 15.dp
                     )
                 } }
                 isLast -> { {
                     RoundedCornerShape(
-                        topStart = 15, bottomStart = 15,
-                        topEnd = 50,   bottomEnd = 50
+                        topStart = 15.dp, bottomStart = 15.dp,
+                        topEnd = 50.dp,   bottomEnd = 50.dp
                     )
                 } }
-                else -> { { RoundedCornerShape(15) } }
+                else -> { { RoundedCornerShape(15.dp) } }
             }
 
             LiquidButton(
