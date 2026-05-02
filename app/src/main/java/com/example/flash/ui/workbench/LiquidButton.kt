@@ -43,7 +43,7 @@ fun LiquidButton(
     tint: Color = Color.Unspecified,
     surfaceColor: Color = Color.Unspecified,
     buttonHeight: Dp = 48.dp,
-    shape: @Composable () -> Shape = { Capsule() },
+    shape: () -> Shape = { Capsule() },
     content: @Composable RowScope.() -> Unit
 ) {
     val animationScope = rememberCoroutineScope()
