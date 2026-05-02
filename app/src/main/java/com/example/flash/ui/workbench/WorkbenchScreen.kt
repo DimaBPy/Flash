@@ -222,7 +222,11 @@ fun WorkbenchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { translationY = screenExitY.value }
-                .background(MaterialTheme.colorScheme.background)
+                .background(
+                    color = MaterialTheme.colorScheme.background.copy(
+                        alpha = if (uiState.shouldExit) 0f else 1f
+                    )
+                )
                 .systemBarsPadding()
         ) {
         // ── Full-screen photo grid — source for all glass effects ────────────
