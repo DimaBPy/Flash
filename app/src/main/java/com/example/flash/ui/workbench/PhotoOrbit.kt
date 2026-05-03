@@ -75,7 +75,7 @@ fun PhotoOrbit(
     val blobTime by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = 1000f,
-        animationSpec = infiniteRepeatable(tween(1_000_000, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(tween(12_000, easing = LinearEasing)),
         label = "blob_time"
     )
 
@@ -84,7 +84,7 @@ fun PhotoOrbit(
         targetValue  = with(density) { 8.dp.toPx() },
         animationSpec = infiniteRepeatable(
             animation = tween(4000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
+            repeatMode = RepeatMode.Restart
         ),
         label = "radial_drift"
     )
