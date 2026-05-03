@@ -104,7 +104,7 @@ private fun TwoPhonesAnimation() {
         targetValue = 8f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
+            repeatMode = RepeatMode.Restart
         ),
         label = "phone_offset"
     )
