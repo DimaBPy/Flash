@@ -229,6 +229,19 @@ Two phones animating in TwoPhonesAnimation:
 - `RippleShader.kt` — AGSL shader for ripple effect on file transfer
 - `gradle/libs.versions.toml` — Dependency versions (AGP, Kotlin, Compose, Ktor, etc.)
 
+## Versioning
+
+### Version Code
+- Located in `app/build.gradle.kts` (line 16)
+- **Increment by 1** whenever ANY file changes that will be included in the APK (essentially any code or resource change)
+- This applies to all branches—increment before committing
+
+### Version Name
+- Located in `app/build.gradle.kts` (line 17)
+- Format: `"x.x, Month Date"` (e.g., `"0.5, May 3"`)
+- **Always discuss version name changes with the user first**—ask what the current version is, then they'll tell you the next one
+- Version code increments automatically; version name is a deliberate decision
+
 ## Performance Notes
 
 - **120Hz target**: Animations use `LinearEasing` for consistent frame rates
