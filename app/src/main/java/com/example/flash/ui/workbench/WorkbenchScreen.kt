@@ -12,6 +12,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -216,6 +217,12 @@ fun WorkbenchScreen(
     // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
+    val bgAlpha by animateFloatAsState(
+        targetValue = if (uiState.shouldExit) 0f else 1f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "bg_alpha"
+    )
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Sliding content (everything except MotherCore) ───────────────────
         Box(
@@ -223,9 +230,7 @@ fun WorkbenchScreen(
                 .fillMaxSize()
                 .graphicsLayer { translationY = screenExitY.value }
                 .background(
-                    color = MaterialTheme.colorScheme.background.copy(
-                        alpha = if (uiState.shouldExit) 0f else 1f
-                    )
+                    color = MaterialTheme.colorScheme.background.copy(alpha = bgAlpha)
                 )
                 .systemBarsPadding()
         ) {
