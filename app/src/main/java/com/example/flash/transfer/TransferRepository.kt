@@ -15,7 +15,7 @@ sealed interface TransferState {
     object Idle : TransferState
     data class Serving(val port: Int, val token: String) : TransferState
     data class Downloading(val progress: Float) : TransferState
-    data class Complete(val receivedFiles: List<File>) : TransferState
+    data class Complete(val receivedFiles: List<File>, val corruptedIndices: List<Int> = emptyList()) : TransferState
     data class Failed(val reason: String) : TransferState
 }
 
@@ -31,7 +31,11 @@ class TransferRepository(
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
 
+    private val _fileVerifiedFlow = MutableStateFlow<Pair<Int, Boolean>?>(null)
+    val fileVerifiedFlow: StateFlow<Pair<Int, Boolean>?> = _fileVerifiedFlow.asStateFlow()
+
     private var downloadJob: Job? = null
+    private val corruptedIndices = mutableListOf<Int>()
 
     val servingFileCount: Int get() = server.fileCount
 
@@ -48,6 +52,7 @@ class TransferRepository(
 
     fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
         downloadJob?.cancel()
+        corruptedIndices.clear()
         downloadJob = scope.launch {
             try {
                 _progressFlow.value = 0f
@@ -59,12 +64,30 @@ class TransferRepository(
                     _transferState.value = TransferState.Downloading(progress)
                 }
 
-                _transferState.value = TransferState.Complete(files)
+                // Verify downloaded files
+                files.forEachIndexed { index, file ->
+                    val isValid = verifyFile(file)
+                    _fileVerifiedFlow.value = Pair(index, isValid)
+                    if (!isValid) {
+                        corruptedIndices.add(index)
+                    }
+                }
+
+                _transferState.value = TransferState.Complete(files, corruptedIndices.toList())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _transferState.value = TransferState.Failed(e.message ?: "Unknown error")
             }
+        }
+    }
+
+    private fun verifyFile(file: File): Boolean {
+        return try {
+            // File exists and is readable
+            file.exists() && file.canRead() && file.length() > 0
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -74,6 +97,8 @@ class TransferRepository(
         server.stop()
         _transferState.value = TransferState.Idle
         _progressFlow.value = 0f
+        _fileVerifiedFlow.value = null
+        corruptedIndices.clear()
     }
 
     fun reset() {

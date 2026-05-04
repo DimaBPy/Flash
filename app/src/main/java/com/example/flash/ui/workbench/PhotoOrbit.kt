@@ -57,7 +57,8 @@ fun PhotoOrbit(
     modifier: Modifier = Modifier,
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
-    shouldExit: Boolean = false
+    shouldExit: Boolean = false,
+    corruptedIndices: Set<Int> = emptySet()
 ) {
     val density = LocalDensity.current
 
