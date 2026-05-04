@@ -62,9 +62,13 @@ The **only** branches you should use are:
 - **Never target develop for CodeRabbit review** — CodeRabbit is configured for `main` only
 - **All PR descriptions must be clean** — no auto-generated footers; they interfere with CodeRabbit command parsing
 - **Commit messages should explain WHY**, not just WHAT
-- **Version management**: 
-  - Increment `versionCode` by 1 for EVERY file change that goes into APK
-  - Discuss `versionName` changes with user before committing
+- **Version management** (CRITICAL — applies to EVERY app file change):
+  - **Always check the current date** before updating versions (system context provides this)
+  - **Increment `versionCode` by 1** for every file change that goes into the APK
+  - **Update `versionName` format**: `"X.Y.Z, Month Day"` (e.g., "0.5.1, May 4")
+  - **Date in versionName is REQUIRED** — it documents when the change was made
+  - **Never commit version changes without the date** — discuss with user if uncertain about version number
+  - Example: If you change `MotherCore.kt`, you MUST increment versionCode AND update versionName with today's date
 
 ### CodeRabbit Configuration
 - Auto-reviews trigger only on PRs targeting `main`
