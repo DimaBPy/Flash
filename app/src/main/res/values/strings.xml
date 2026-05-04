@@ -21,9 +21,10 @@
     <string name="cd_core">Mother Core</string>
     <string name="hce_service_desc">Flash Handshake Service</string>
     <string name="hce_aid_group_desc">Flash NFC Handshake</string>
-    <string name="corruption_title">Well, that's awkward</string>
-    <string name="corruption_subtitle">These photos didn\'t make the cut</string>
-    <string name="corruption_description">Network hiccup got \'em. They\'ve been deleted to save your sanity.</string>
+    <string name="corruption_title">Network said no thanks</string>
+    <string name="corruption_subtitle">These ones didn\'t survive the trip</string>
+    <string name="corruption_description">Deleted to spare your feelings. Network said these were sus.</string>
+    <string name="corruption_question">Do you want to retry?</string>
     <string name="corruption_button_skip">Nope, never mind)</string>
     <string name="corruption_button_retry">Yeah, absolutely, I don\'t want to lose them!</string>
 </resources>

@@ -56,7 +56,8 @@ fun PhotoOrbit(
     modifier: Modifier = Modifier,
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
-    shouldExit: Boolean = false
+    shouldExit: Boolean = false,
+    corruptedIndices: Set<Int> = emptySet()
 ) {
     val density = LocalDensity.current
 
@@ -134,6 +135,8 @@ fun PhotoOrbit(
                 val phaseOffset = phaseMap[uri] ?: 0f
                 val isExiting = uri in exitingPhotos || shouldExit
                 val isReceiving = uri in receivingPhotos
+                val uriIndex = receivingPhotos.indexOf(uri)
+                val isCorrupted = uriIndex >= 0 && uriIndex in corruptedIndices
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -146,6 +149,7 @@ fun PhotoOrbit(
                     photoSizePx = photoSizePx,
                     isExiting = isExiting,
                     isReceiving = isReceiving,
+                    isCorrupted = isCorrupted,
                     successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
                     onExitComplete = {
                         visiblePhotos.remove(uri)
@@ -171,6 +175,7 @@ private fun OrbitPhotoItem(
     photoSizePx: Float,
     isExiting: Boolean,
     isReceiving: Boolean = false,
+    isCorrupted: Boolean = false,
     successProgress: Float = 0f,
     onExitComplete: () -> Unit
 ) {
@@ -264,6 +269,16 @@ private fun OrbitPhotoItem(
                     )
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
+                    }
+
+                    // Red tint for corrupted photos
+                    if (isCorrupted) {
+                        clipPath(path) {
+                            drawRect(
+                                color = Color.Red.copy(alpha = 0.25f),
+                                size = this.size
+                            )
+                        }
                     }
                 }
             }

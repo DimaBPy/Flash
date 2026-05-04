@@ -307,7 +307,8 @@ fun WorkbenchScreen(
             coreCenter       = coreCenter,
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
-            shouldExit       = uiState.shouldExit
+            shouldExit       = uiState.shouldExit,
+            corruptedIndices = uiState.corruptedIndicesInOrbit
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
@@ -898,34 +899,31 @@ private fun CorruptionAlert(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
-                    Text(
-                        text = stringResource(R.string.corruption_description),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 20.dp)
-                    )
 
                     HorizontalDivider(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
 
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    // Corrupted photos as circles in circular arrangement
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 200.dp)
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        items(corruptedPhotos) { uri ->
+                        corruptedPhotos.forEachIndexed { index, uri ->
+                            val angle = (index / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
+                            val radiusPx = 70f
+                            val offsetX = (radiusPx * kotlin.math.cos(angle)).toInt()
+                            val offsetY = (radiusPx * kotlin.math.sin(angle)).toInt()
+
                             Box(
                                 modifier = Modifier
-                                    .size(70.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                                    .size(60.dp)
+                                    .offset(offsetX.dp, offsetY.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
                             ) {
                                 AsyncImage(
                                     model = uri,
@@ -933,23 +931,38 @@ private fun CorruptionAlert(
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .alpha(0.6f)
+                                        .alpha(0.7f)
                                 )
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.2f)),
+                                        .background(Color.Red.copy(alpha = 0.3f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "✕",
-                                        style = MaterialTheme.typography.displaySmall,
+                                        style = MaterialTheme.typography.headlineMedium,
                                         color = MaterialTheme.colorScheme.error
                                     )
                                 }
                             }
                         }
                     }
+
+                    Text(
+                        text = stringResource(R.string.corruption_question),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    )
 
                     Row(
                         modifier = Modifier
