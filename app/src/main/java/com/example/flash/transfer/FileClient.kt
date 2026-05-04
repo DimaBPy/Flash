@@ -9,10 +9,14 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
+
+data class DownloadedFile(val file: File, val expectedChecksum: String?)
 
 class FileClient {
 
@@ -23,16 +27,20 @@ class FileClient {
         }
     }
 
+    private val corruptedFiles = mutableListOf<String>()
+
     suspend fun downloadAll(
         ip: String,
         port: Int,
         token: String,
         fileCount: Int,
         destDir: File,
-        onProgress: (Float) -> Unit
+        onProgress: (Float) -> Unit,
+        onCorrupted: (List<String>) -> Unit = {}
     ): List<File> {
         val progresses = FloatArray(fileCount)
         val files = arrayOfNulls<File>(fileCount)
+        val checksums = arrayOfNulls<String>(fileCount)
         val lock = Any()
 
         supervisorScope {
@@ -45,13 +53,45 @@ class FileClient {
                                 onProgress(progresses.average().toFloat())
                             }
                         }
-                    }.onSuccess { files[index] = it }
+                    }.onSuccess { (file, checksum) ->
+                        synchronized(lock) {
+                            files[index] = file
+                            checksums[index] = checksum
+                        }
+                    }
                 }
             }
         }
 
         onProgress(1f)
-        return files.filterNotNull()
+        val result = files.filterNotNull()
+
+        // Async corruption check in background
+        launchVerification(files, checksums, onCorrupted)
+
+        return result
+    }
+
+    private suspend fun launchVerification(
+        files: Array<File?>,
+        checksums: Array<String?>,
+        onCorrupted: (List<String>) -> Unit
+    ) {
+        supervisorScope {
+            launch {
+                delay(500)  // Let UI settle
+                corruptedFiles.clear()
+                checksums.forEachIndexed { index, checksum ->
+                    val file = files[index]
+                    if (checksum != null && file != null) {
+                        verifyChecksum(file, checksum)
+                    }
+                }
+                if (corruptedFiles.isNotEmpty()) {
+                    onCorrupted(corruptedFiles.toList())
+                }
+            }
+        }
     }
 
     suspend fun download(
@@ -61,7 +101,7 @@ class FileClient {
         index: Int,
         destDir: File,
         onProgress: (Float) -> Unit
-    ): File {
+    ): DownloadedFile {
         destDir.mkdirs()
 
         val response: HttpResponse = client.get("http://$ip:$port/transfer/$token/$index")
@@ -71,6 +111,7 @@ class FileClient {
         }
 
         val contentLength = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        val expectedChecksum = response.headers["X-File-Checksum"]
         val rawDisposition = response.headers[HttpHeaders.ContentDisposition] ?: ""
         val baseName = sanitizeFileName(extractFileName(rawDisposition))
             ?: "received_${System.currentTimeMillis()}"
@@ -99,7 +140,22 @@ class FileClient {
         }
 
         onProgress(1f)
-        return dest
+        return DownloadedFile(dest, expectedChecksum)
+    }
+
+    private fun verifyChecksum(file: File, expectedChecksum: String) {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(8192)
+            var count: Int
+            while (input.read(buffer).also { count = it } > 0) {
+                digest.update(buffer, 0, count)
+            }
+        }
+        val actualChecksum = digest.digest().joinToString("") { "%02x".format(it) }
+        if (actualChecksum != expectedChecksum) {
+            corruptedFiles.add(file.name)
+        }
     }
 
     private fun extractFileName(disposition: String): String? {
@@ -119,6 +175,8 @@ class FileClient {
             .trim()
         return if (base.isBlank() || base == "." || base == "..") null else base
     }
+
+    fun getCorruptedFiles(): List<String> = corruptedFiles.toList()
 
     fun close() = client.close()
 }
