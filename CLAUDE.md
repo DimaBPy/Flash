@@ -44,7 +44,6 @@ The **only** branches you should use are:
 1. **`claude-code`** — Your feature/development branch (long-lived)
 2. **`develop`** — Integration branch where features merge after testing
 3. **`main`** — Production branch (protected; direct pushes prohibited)
-4. **`release`** — Release prep branch (used before main merge)
 
 **Important**: Do NOT create temporary feature branches like `claude/resume-after-network-issues`. All work goes on `claude-code`.
 
