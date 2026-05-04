@@ -86,6 +86,7 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
     }
 
+    /** Handle file verification result: track corruption or stagger valid photo landing. */
     private fun onPhotoVerified(index: Int, isValid: Boolean) {
         if (!isValid) {
             _uiState.update {
@@ -108,6 +109,7 @@ class WorkbenchViewModel(
         }
     }
 
+    /** Check if the device has an active Wi-Fi connection. */
     private fun isWifiConnected(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
@@ -116,18 +118,21 @@ class WorkbenchViewModel(
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
+    /** Update Wi-Fi connectivity status and recompute hotspot prompt visibility. */
     fun updateWifiStatus(context: Context) {
         val connected = isWifiConnected(context)
         _uiState.update { it.copy(isWifiConnected = connected) }
         checkHotspotPromptVisibility()
     }
 
+    /** Show hotspot prompt only when photos are selected, Wi-Fi is down, and not receiving. */
     private fun checkHotspotPromptVisibility() {
         val state = _uiState.value
         val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
         _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
     }
 
+    /** Hide the hotspot prompt modal. */
     fun dismissHotspotPrompt() {
         _uiState.update { it.copy(showHotspotPrompt = false) }
     }

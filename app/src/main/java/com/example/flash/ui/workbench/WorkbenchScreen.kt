@@ -1034,6 +1034,7 @@ private fun CorruptionAlert(
 }
 
 // ── Hotspot Prompt Modal ──────────────────────────────────────────────────
+/** Animated modal prompting user to enable hotspot when selecting photos without Wi-Fi. */
 @Composable
 private fun HotspotPromptModal(
     visible: Boolean,
