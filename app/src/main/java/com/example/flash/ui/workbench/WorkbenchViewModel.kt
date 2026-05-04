@@ -41,7 +41,7 @@ data class WorkbenchUiState(
     val shouldExit: Boolean      = false,
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
-    val corruptedFileNames: List<String> = emptyList()
+    val corruptedPhotos: List<Uri> = emptyList()
 )
 
 class WorkbenchViewModel(
@@ -169,16 +169,20 @@ class WorkbenchViewModel(
     private fun onTransferStateChanged(state: TransferState) {
         when (state) {
             is TransferState.Complete -> {
-                val fileUris = state.receivedFiles.map { file ->
+                val allFileUris = state.receivedFiles.map { file ->
                     android.net.Uri.fromFile(file)
                 }
+                val corruptedSet = state.corruptedIndices.toSet()
+                val validPhotos = allFileUris.filterIndexed { idx, _ -> idx !in corruptedSet }
+                val corruptedPhotos = allFileUris.filterIndexed { idx, _ -> idx in corruptedSet }
+
                 _uiState.update {
                     it.copy(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivingPhotos = fileUris,
-                        corruptedFileNames = state.corruptedFiles
+                        receivingPhotos = validPhotos,
+                        corruptedPhotos = corruptedPhotos
                     )
                 }
             }
@@ -221,6 +225,14 @@ class WorkbenchViewModel(
     }
 
     fun dismissCorruptionAlert() {
-        _uiState.update { it.copy(corruptedFileNames = emptyList()) }
+        _uiState.update { it.copy(corruptedPhotos = emptyList()) }
+    }
+
+    fun retryCorruptedPhotos(context: Context) {
+        val currentState = _uiState.value
+        if (currentState.corruptedPhotos.isNotEmpty()) {
+            dismissCorruptionAlert()
+            _uiState.update { it.copy(nfcState = NfcUiState.Idle) }
+        }
     }
 }

@@ -28,6 +28,7 @@ class FileClient {
     }
 
     private val corruptedFiles = mutableListOf<String>()
+    private val corruptedIndices = mutableListOf<Int>()
 
     suspend fun downloadAll(
         ip: String,
@@ -36,7 +37,7 @@ class FileClient {
         fileCount: Int,
         destDir: File,
         onProgress: (Float) -> Unit,
-        onCorrupted: (List<String>) -> Unit = {}
+        onCorrupted: (List<String>, List<Int>) -> Unit = { _, _ -> }
     ): List<File> {
         val progresses = FloatArray(fileCount)
         val files = arrayOfNulls<File>(fileCount)
@@ -75,23 +76,24 @@ class FileClient {
     private suspend fun launchVerification(
         files: Array<File?>,
         checksums: Array<String?>,
-        onCorrupted: (List<String>) -> Unit
+        onCorrupted: (List<String>, List<Int>) -> Unit
     ) {
         supervisorScope {
             launch {
                 delay(500)  // Let UI settle
                 corruptedFiles.clear()
+                corruptedIndices.clear()
                 checksums.forEachIndexed { index, checksum ->
                     val file = files[index]
                     if (checksum != null && file != null) {
-                        verifyChecksum(file, checksum)
+                        verifyChecksum(file, checksum, index)
                     }
                 }
                 if (corruptedFiles.isNotEmpty()) {
                     corruptedFiles.forEach { fileName ->
                         files.filterNotNull().find { it.name == fileName }?.delete()
                     }
-                    onCorrupted(corruptedFiles.toList())
+                    onCorrupted(corruptedFiles.toList(), corruptedIndices.toList())
                 }
             }
         }
@@ -146,7 +148,7 @@ class FileClient {
         return DownloadedFile(dest, expectedChecksum)
     }
 
-    private fun verifyChecksum(file: File, expectedChecksum: String) {
+    private fun verifyChecksum(file: File, expectedChecksum: String, index: Int) {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -158,6 +160,7 @@ class FileClient {
         val actualChecksum = digest.digest().joinToString("") { "%02x".format(it) }
         if (actualChecksum != expectedChecksum) {
             corruptedFiles.add(file.name)
+            corruptedIndices.add(index)
         }
     }
 

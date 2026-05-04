@@ -81,8 +81,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -436,79 +438,13 @@ fun WorkbenchScreen(
             )
         }
 
-        // ── Corruption alert ─────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible = uiState.corruptedFileNames.isNotEmpty(),
-            enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.9f),
-            exit    = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.9f),
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(32.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .background(
-                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .padding(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .wrapContentHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "⚠️ Corrupted Files",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    Text(
-                        text = "${uiState.corruptedFileNames.size} file(s) failed integrity check and were deleted",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.2f),
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 120.dp)
-                    ) {
-                        items(uiState.corruptedFileNames) { fileName ->
-                            Text(
-                                text = "• $fileName",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                maxLines = 1,
-                                overflow = androidx.compose.foundation.text.TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
-                        }
-                    }
-                    LiquidButton(
-                        onClick      = { viewModel.dismissCorruptionAlert() },
-                        backdrop     = backdrop,
-                        enabled      = true,
-                        surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.3f),
-                        modifier     = Modifier
-                            .padding(top = 12.dp)
-                            .width(100.dp)
-                    ) {
-                        Text(
-                            text = "Dismiss",
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                }
-            }
-        }
+        // ── Corruption alert modal ──────────────────────────────────────────
+        CorruptionAlert(
+            corruptedPhotos = uiState.corruptedPhotos,
+            backdrop = backdrop,
+            onDismiss = { viewModel.dismissCorruptionAlert() },
+            onRetry = { viewModel.retryCorruptedPhotos(context) }
+        )
         } // end sliding Box
 
         // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
@@ -905,6 +841,154 @@ private fun PhotoGridItem(
             Box(modifier = Modifier
                 .fillMaxSize()
                 .background(OceanAqua.copy(alpha = 0.35f)))
+        }
+    }
+}
+
+// ── Corruption Alert Modal ──────────────────────────────────────────────────
+@Composable
+private fun CorruptionAlert(
+    corruptedPhotos: List<Uri>,
+    backdrop: Backdrop,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit
+) {
+    val density = LocalDensity.current
+
+    AnimatedVisibility(
+        visible = corruptedPhotos.isNotEmpty(),
+        enter   = fadeIn(tween(400, delayMillis = 500)) + scaleIn(tween(400, delayMillis = 500), initialScale = 0.85f),
+        exit    = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.9f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .wrapContentHeight()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                    )
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        effects = { blur(radius = 6.dp) + vibrancy(intensity = 0.3f) }
+                    )
+                    .padding(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = stringResource(R.string.corruption_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_subtitle),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                    ) {
+                        items(corruptedPhotos) { uri ->
+                            Box(
+                                modifier = Modifier
+                                    .size(70.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                            ) {
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .alpha(0.6f)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✕",
+                                        style = MaterialTheme.typography.displaySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        LiquidButton(
+                            onClick      = onDismiss,
+                            backdrop     = backdrop,
+                            enabled      = true,
+                            surfaceColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            modifier     = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.corruption_button_skip),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        LiquidButton(
+                            onClick      = onRetry,
+                            backdrop     = backdrop,
+                            enabled      = true,
+                            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            modifier     = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.corruption_button_retry),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

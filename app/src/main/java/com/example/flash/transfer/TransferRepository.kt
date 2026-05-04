@@ -15,7 +15,11 @@ sealed interface TransferState {
     object Idle : TransferState
     data class Serving(val port: Int, val token: String) : TransferState
     data class Downloading(val progress: Float) : TransferState
-    data class Complete(val receivedFiles: List<File>, val corruptedFiles: List<String> = emptyList()) : TransferState
+    data class Complete(
+        val receivedFiles: List<File>,
+        val corruptedFiles: List<String> = emptyList(),
+        val corruptedIndices: List<Int> = emptyList()
+    ) : TransferState
     data class Failed(val reason: String) : TransferState
 }
 
@@ -60,10 +64,10 @@ class TransferRepository(
                         _progressFlow.value = progress
                         _transferState.value = TransferState.Downloading(progress)
                     },
-                    onCorrupted = { corrupted ->
+                    onCorrupted = { corrupted, indices ->
                         val current = _transferState.value
                         if (current is TransferState.Complete) {
-                            _transferState.value = current.copy(corruptedFiles = corrupted)
+                            _transferState.value = current.copy(corruptedFiles = corrupted, corruptedIndices = indices)
                         }
                     }
                 )
