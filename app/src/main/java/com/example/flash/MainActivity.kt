@@ -57,7 +57,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Stop both modes on pause to be a good citizen
+        // Stop NFC handling when app is backgrounded (prevent interference with other apps/cards)
+        nfcManager.disableForegroundDispatch(this)
+        nfcManager.disableReaderMode(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Extra safety: ensure NFC is fully disabled when app closes
         nfcManager.disableForegroundDispatch(this)
         nfcManager.disableReaderMode(this)
     }

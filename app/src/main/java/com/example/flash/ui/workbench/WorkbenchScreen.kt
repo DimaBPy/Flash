@@ -1,8 +1,13 @@
 package com.example.flash.ui.workbench
 
 import android.Manifest
+import android.app.PendingIntent
+import android.content.ContentUris
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.nfc.NfcAdapter
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -131,14 +136,23 @@ fun WorkbenchScreen(
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // ── Dynamic NFC mode ────────────────────────────────────────────────────
-    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
+    // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
+    // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
+    // This prevents Android's NFC app selector dialog from interfering with the handshake
+    LaunchedEffect(Unit) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
-        if (uiState.selectedPhotos.isEmpty()) {
-            nfcManager.enableReaderMode(act) { ndef -> viewModel.onNdefHandshakeReceived(ndef) }
-        } else {
-            nfcManager.disableReaderMode(act)
-        }
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, act::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP) },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+        val filters = arrayOf(
+            IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
+        )
+        // Enable foreground dispatch in both send and receive modes
+        nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
     }
 
     // ── Permission + auto-load camera roll ───────────────────────────────────
