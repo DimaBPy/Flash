@@ -2,12 +2,14 @@ package com.example.flash.ui.workbench
 
 import android.Manifest
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.ContentUris
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.nfc.NfcAdapter
+import android.nfc.cardemulation.CardEmulation
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -153,6 +155,30 @@ fun WorkbenchScreen(
         )
         // Enable foreground dispatch in both send and receive modes
         nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
+    }
+
+    // ── NFC Preferred Service (receiver mode only) ──────────────────────────
+    // When receiving, set Flash as the preferred HCE service to override system NFC routing
+    LaunchedEffect(uiState.isReceiving) {
+        val act = context as? android.app.Activity ?: return@LaunchedEffect
+        val adapter = NfcAdapter.getDefaultAdapter(context) ?: return@LaunchedEffect
+
+        if (uiState.isReceiving && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                val cardEmulation = CardEmulation.getInstance(adapter)
+                val hostApduService = ComponentName(context, "com.example.flash.nfc.HandshakeHceService")
+                cardEmulation.setPreferredService(act, hostApduService)
+            } catch (e: Exception) {
+                android.util.Log.w("Flash", "Could not set preferred NFC service", e)
+            }
+        } else if (!uiState.isReceiving) {
+            try {
+                val cardEmulation = CardEmulation.getInstance(adapter)
+                cardEmulation.unsetPreferredService(act)
+            } catch (e: Exception) {
+                // Device may not support this
+            }
+        }
     }
 
     // ── Permission + auto-load camera roll ───────────────────────────────────

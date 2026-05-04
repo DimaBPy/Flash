@@ -49,9 +49,12 @@ class NfcManager(private val context: Context) {
             put("fileCount", fileCount)
         }.toString()
 
-        val msg = NdefMessage(
-            NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
-        )
+        val mimeRecord = NdefRecord.createMime("application/vnd.flash.handshake", json.toByteArray(Charsets.UTF_8))
+
+        // Add Android Application Record (AAR) at the end to prevent system app conflicts
+        val aarRecord = NdefRecord.createApplicationRecord("com.example.flash")
+
+        val msg = NdefMessage(arrayOf(mimeRecord, aarRecord))
         outboundMessage = msg
         HandshakeHceService.ndefMessageBytes = msg.toByteArray()
     }
