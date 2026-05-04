@@ -35,6 +35,9 @@ class TransferRepository(
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
 
+    private val _fileVerifiedFlow = MutableStateFlow<Pair<Int, Boolean>?>(null)
+    val fileVerifiedFlow: StateFlow<Pair<Int, Boolean>?> = _fileVerifiedFlow.asStateFlow()
+
     private var downloadJob: Job? = null
 
     val servingFileCount: Int get() = server.fileCount
@@ -63,6 +66,9 @@ class TransferRepository(
                     onProgress = { progress ->
                         _progressFlow.value = progress
                         _transferState.value = TransferState.Downloading(progress)
+                    },
+                    onFileVerified = { index, isValid ->
+                        _fileVerifiedFlow.value = index to isValid
                     },
                     onCorrupted = { corrupted, indices ->
                         val current = _transferState.value

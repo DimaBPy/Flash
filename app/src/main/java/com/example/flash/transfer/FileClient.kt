@@ -29,6 +29,7 @@ class FileClient {
 
     private val corruptedFiles = mutableListOf<String>()
     private val corruptedIndices = mutableListOf<Int>()
+    private val verifiedFiles = mutableListOf<Pair<Int, Boolean>>()
 
     suspend fun downloadAll(
         ip: String,
@@ -37,6 +38,7 @@ class FileClient {
         fileCount: Int,
         destDir: File,
         onProgress: (Float) -> Unit,
+        onFileVerified: (index: Int, isValid: Boolean) -> Unit = { _, _ -> },
         onCorrupted: (List<String>, List<Int>) -> Unit = { _, _ -> }
     ): List<File> {
         val progresses = FloatArray(fileCount)
@@ -68,7 +70,7 @@ class FileClient {
         val result = files.filterNotNull()
 
         // Async corruption check in background
-        launchVerification(files, checksums, onCorrupted)
+        launchVerification(files, checksums, onFileVerified, onCorrupted)
 
         return result
     }
@@ -76,6 +78,7 @@ class FileClient {
     private suspend fun launchVerification(
         files: Array<File?>,
         checksums: Array<String?>,
+        onFileVerified: (index: Int, isValid: Boolean) -> Unit,
         onCorrupted: (List<String>, List<Int>) -> Unit
     ) {
         supervisorScope {
@@ -83,10 +86,13 @@ class FileClient {
                 delay(500)  // Let UI settle
                 corruptedFiles.clear()
                 corruptedIndices.clear()
+                verifiedFiles.clear()
                 checksums.forEachIndexed { index, checksum ->
                     val file = files[index]
                     if (checksum != null && file != null) {
-                        verifyChecksum(file, checksum, index)
+                        val isValid = verifyChecksum(file, checksum, index)
+                        verifiedFiles.add(index to isValid)
+                        onFileVerified(index, isValid)
                     }
                 }
                 if (corruptedFiles.isNotEmpty()) {
@@ -148,7 +154,7 @@ class FileClient {
         return DownloadedFile(dest, expectedChecksum)
     }
 
-    private fun verifyChecksum(file: File, expectedChecksum: String, index: Int) {
+    private fun verifyChecksum(file: File, expectedChecksum: String, index: Int): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(8192)
@@ -158,10 +164,12 @@ class FileClient {
             }
         }
         val actualChecksum = digest.digest().joinToString("") { "%02x".format(it) }
-        if (actualChecksum != expectedChecksum) {
+        val isValid = actualChecksum == expectedChecksum
+        if (!isValid) {
             corruptedFiles.add(file.name)
             corruptedIndices.add(index)
         }
+        return isValid
     }
 
     private fun extractFileName(disposition: String): String? {

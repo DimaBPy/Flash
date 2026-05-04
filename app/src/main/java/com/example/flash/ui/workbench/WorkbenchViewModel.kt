@@ -41,7 +41,8 @@ data class WorkbenchUiState(
     val shouldExit: Boolean      = false,
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
-    val corruptedPhotos: List<Uri> = emptyList()
+    val corruptedPhotos: List<Uri> = emptyList(),
+    val corruptedIndicesInOrbit: Set<Int> = emptySet()
 )
 
 class WorkbenchViewModel(
@@ -70,6 +71,37 @@ class WorkbenchViewModel(
                 _uiState.update { it.copy(transferProgress = progress) }
             }
             .launchIn(viewModelScope)
+
+        transferRepository.fileVerifiedFlow
+            .onEach { result ->
+                if (result != null) {
+                    val (index, isValid) = result
+                    onPhotoVerified(index, isValid)
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun onPhotoVerified(index: Int, isValid: Boolean) {
+        if (!isValid) {
+            _uiState.update {
+                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
+            }
+        } else {
+            val allReceiving = _uiState.value.receivingPhotos
+            if (index < allReceiving.size) {
+                val photoUri = allReceiving[index]
+                viewModelScope.launch {
+                    delay(100)
+                    _uiState.update { state ->
+                        state.copy(
+                            photos = (state.photos + photoUri).distinct(),
+                            receivingPhotos = state.receivingPhotos - photoUri
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun loadGalleryPhotos(context: Context) {
@@ -173,7 +205,6 @@ class WorkbenchViewModel(
                     android.net.Uri.fromFile(file)
                 }
                 val corruptedSet = state.corruptedIndices.toSet()
-                val validPhotos = allFileUris.filterIndexed { idx, _ -> idx !in corruptedSet }
                 val corruptedPhotos = allFileUris.filterIndexed { idx, _ -> idx in corruptedSet }
 
                 _uiState.update {
@@ -181,7 +212,7 @@ class WorkbenchViewModel(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivingPhotos = validPhotos,
+                        receivingPhotos = allFileUris,
                         corruptedPhotos = corruptedPhotos
                     )
                 }
