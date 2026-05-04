@@ -31,8 +31,8 @@ class TransferRepository(
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
 
-    private val _fileVerifiedFlow = MutableStateFlow<Pair<Int, Boolean>?>(null)
-    val fileVerifiedFlow: StateFlow<Pair<Int, Boolean>?> = _fileVerifiedFlow.asStateFlow()
+    private val _fileVerifiedFlow = MutableStateFlow<Triple<Int, android.net.Uri, Boolean>?>(null)
+    val fileVerifiedFlow: StateFlow<Triple<Int, android.net.Uri, Boolean>?> = _fileVerifiedFlow.asStateFlow()
 
     private var downloadJob: Job? = null
     private val corruptedIndices = mutableListOf<Int>()
@@ -67,7 +67,8 @@ class TransferRepository(
                 // Verify downloaded files
                 files.forEachIndexed { index, file ->
                     val isValid = verifyFile(file)
-                    _fileVerifiedFlow.value = Pair(index, isValid)
+                    val fileUri = android.net.Uri.fromFile(file)
+                    _fileVerifiedFlow.value = Triple(index, fileUri, isValid)
                     if (!isValid) {
                         corruptedIndices.add(index)
                     }

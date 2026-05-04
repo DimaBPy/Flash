@@ -280,19 +280,19 @@ private fun OrbitPhotoItem(
                     )
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
-                    }
 
-                    // Corruption indicator: red overlay for corrupted photos
-                    if (isCorrupted) {
-                        drawRect(
-                            color = Color.Red.copy(alpha = 0.3f),
-                            size = size
-                        )
-                        drawCircle(
-                            color = Color.Red.copy(alpha = 0.6f),
-                            radius = size.width * 0.15f,
-                            center = Offset(size.width / 2f, size.height / 2f)
-                        )
+                        // Corruption indicator: red overlay for corrupted photos
+                        if (isCorrupted) {
+                            drawRect(
+                                color = Color.Red.copy(alpha = 0.3f),
+                                size = size
+                            )
+                            drawCircle(
+                                color = Color.Red.copy(alpha = 0.6f),
+                                radius = size.width * 0.15f,
+                                center = Offset(size.width / 2f, size.height / 2f)
+                            )
+                        }
                     }
                 }
             }

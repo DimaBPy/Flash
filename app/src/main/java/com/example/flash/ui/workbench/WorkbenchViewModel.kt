@@ -44,7 +44,6 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
-    val corruptedIndicesInOrbit: Set<Int> = emptySet(),
     val isWifiConnected: Boolean = false,
     val showHotspotPrompt: Boolean = false
 )
@@ -79,31 +78,27 @@ class WorkbenchViewModel(
         transferRepository.fileVerifiedFlow
             .onEach { result ->
                 if (result != null) {
-                    val (index, isValid) = result
-                    onPhotoVerified(index, isValid)
+                    val (index, uri, isValid) = result
+                    onPhotoVerified(index, uri, isValid)
                 }
             }
             .launchIn(viewModelScope)
     }
 
-    /** Handle file verification result: track corruption or stagger valid photo landing. */
-    private fun onPhotoVerified(index: Int, isValid: Boolean) {
+    /** Handle file verification result: track corruption. */
+    private fun onPhotoVerified(index: Int, uri: Uri, isValid: Boolean) {
         if (!isValid) {
             _uiState.update {
-                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
+                it.copy(corruptedPhotos = it.corruptedPhotos + uri)
             }
         } else {
-            val allReceiving = _uiState.value.receivingPhotos
-            if (index < allReceiving.size) {
-                val photoUri = allReceiving[index]
-                viewModelScope.launch {
-                    delay(100)
-                    _uiState.update { state ->
-                        state.copy(
-                            photos = (state.photos + photoUri).distinct(),
-                            receivingPhotos = state.receivingPhotos - photoUri
-                        )
-                    }
+            viewModelScope.launch {
+                delay(100)
+                _uiState.update { state ->
+                    state.copy(
+                        photos = (state.photos + uri).distinct(),
+                        receivingPhotos = state.receivingPhotos - uri
+                    )
                 }
             }
         }
@@ -296,7 +291,7 @@ class WorkbenchViewModel(
         _uiState.update { it.copy(corruptedPhotos = emptyList()) }
     }
 
-    fun retryCorruptedPhotos(context: Context) {
+    fun retryCorruptedPhotos() {
         val currentState = _uiState.value
         if (currentState.corruptedPhotos.isNotEmpty()) {
             dismissCorruptionAlert()
