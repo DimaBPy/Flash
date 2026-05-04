@@ -1,8 +1,15 @@
 package com.example.flash.ui.workbench
 
 import android.Manifest
+import android.app.PendingIntent
+import android.content.ComponentName
+import android.content.ContentUris
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.nfc.NfcAdapter
+import android.nfc.cardemulation.CardEmulation
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,6 +19,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +47,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -70,8 +81,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -130,13 +143,46 @@ fun WorkbenchScreen(
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // ── Dynamic NFC mode ────────────────────────────────────────────────────
-    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
+    // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
+    // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
+    // This prevents Android's NFC app selector dialog from interfering with the handshake
+    LaunchedEffect(Unit) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
-        if (uiState.selectedPhotos.isEmpty()) {
-            nfcManager.enableReaderMode(act) { ndef -> viewModel.onNdefHandshakeReceived(ndef) }
-        } else {
-            nfcManager.disableReaderMode(act)
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, act::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP) },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+        val filters = arrayOf(
+            IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
+            IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
+        )
+        // Enable foreground dispatch in both send and receive modes
+        nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
+    }
+
+    // ── NFC Preferred Service (receiver mode only) ──────────────────────────
+    // When receiving, set Flash as the preferred HCE service to override system NFC routing
+    LaunchedEffect(uiState.isReceiving) {
+        val act = context as? android.app.Activity ?: return@LaunchedEffect
+        val adapter = NfcAdapter.getDefaultAdapter(context) ?: return@LaunchedEffect
+
+        if (uiState.isReceiving && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                val cardEmulation = CardEmulation.getInstance(adapter)
+                val hostApduService = ComponentName(context, "com.example.flash.nfc.HandshakeHceService")
+                cardEmulation.setPreferredService(act, hostApduService)
+            } catch (e: Exception) {
+                android.util.Log.w("Flash", "Could not set preferred NFC service", e)
+            }
+        } else if (!uiState.isReceiving) {
+            try {
+                val cardEmulation = CardEmulation.getInstance(adapter)
+                cardEmulation.unsetPreferredService(act)
+            } catch (e: Exception) {
+                // Device may not support this
+            }
         }
     }
 
@@ -216,6 +262,12 @@ fun WorkbenchScreen(
     // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
+    val bgAlpha by animateFloatAsState(
+        targetValue = if (uiState.shouldExit) 0f else 1f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "bg_alpha"
+    )
+
     Box(modifier = Modifier.fillMaxSize()) {
         // ── Sliding content (everything except MotherCore) ───────────────────
         Box(
@@ -223,9 +275,7 @@ fun WorkbenchScreen(
                 .fillMaxSize()
                 .graphicsLayer { translationY = screenExitY.value }
                 .background(
-                    color = MaterialTheme.colorScheme.background.copy(
-                        alpha = if (uiState.shouldExit) 0f else 1f
-                    )
+                    color = MaterialTheme.colorScheme.background.copy(alpha = bgAlpha)
                 )
                 .systemBarsPadding()
         ) {
@@ -257,7 +307,8 @@ fun WorkbenchScreen(
             coreCenter       = coreCenter,
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
-            shouldExit       = uiState.shouldExit
+            shouldExit       = uiState.shouldExit,
+            corruptedIndices = uiState.corruptedIndicesInOrbit
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
@@ -387,6 +438,14 @@ fun WorkbenchScreen(
                 onComplete = { viewModel.onRippleComplete() }
             )
         }
+
+        // ── Corruption alert modal ──────────────────────────────────────────
+        CorruptionAlert(
+            corruptedPhotos = uiState.corruptedPhotos,
+            backdrop = backdrop,
+            onDismiss = { viewModel.dismissCorruptionAlert() },
+            onRetry = { viewModel.retryCorruptedPhotos(context) }
+        )
         } // end sliding Box
 
         // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
@@ -783,6 +842,166 @@ private fun PhotoGridItem(
             Box(modifier = Modifier
                 .fillMaxSize()
                 .background(OceanAqua.copy(alpha = 0.35f)))
+        }
+    }
+}
+
+// ── Corruption Alert Modal ──────────────────────────────────────────────────
+@Composable
+private fun CorruptionAlert(
+    corruptedPhotos: List<Uri>,
+    backdrop: Backdrop,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit
+) {
+    val density = LocalDensity.current
+
+    AnimatedVisibility(
+        visible = corruptedPhotos.isNotEmpty(),
+        enter   = fadeIn(tween(400, delayMillis = 500)) + scaleIn(tween(400, delayMillis = 500), initialScale = 0.85f),
+        exit    = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.9f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .wrapContentHeight()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                    )
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        effects = { blur(radius = 6.dp) + vibrancy(intensity = 0.3f) }
+                    )
+                    .padding(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = stringResource(R.string.corruption_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_subtitle),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    // Corrupted photos as circles in circular arrangement
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        corruptedPhotos.forEachIndexed { index, uri ->
+                            val angle = (index / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
+                            val radiusPx = 70f
+                            val offsetX = (radiusPx * kotlin.math.cos(angle)).toInt()
+                            val offsetY = (radiusPx * kotlin.math.sin(angle)).toInt()
+
+                            Box(
+                                modifier = Modifier
+                                    .size(60.dp)
+                                    .offset(offsetX.dp, offsetY.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
+                            ) {
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .alpha(0.7f)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Red.copy(alpha = 0.3f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✕",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = stringResource(R.string.corruption_question),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        LiquidButton(
+                            onClick      = onDismiss,
+                            backdrop     = backdrop,
+                            enabled      = true,
+                            surfaceColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            modifier     = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.corruption_button_skip),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        LiquidButton(
+                            onClick      = onRetry,
+                            backdrop     = backdrop,
+                            enabled      = true,
+                            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            modifier     = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.corruption_button_retry),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

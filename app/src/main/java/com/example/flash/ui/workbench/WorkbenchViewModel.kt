@@ -40,7 +40,9 @@ data class WorkbenchUiState(
     val showRipple: Boolean      = false,
     val shouldExit: Boolean      = false,
     val receivedPhotos: List<Uri> = emptyList(),
-    val receivingPhotos: List<Uri> = emptyList()
+    val receivingPhotos: List<Uri> = emptyList(),
+    val corruptedPhotos: List<Uri> = emptyList(),
+    val corruptedIndicesInOrbit: Set<Int> = emptySet()
 )
 
 class WorkbenchViewModel(
@@ -69,6 +71,37 @@ class WorkbenchViewModel(
                 _uiState.update { it.copy(transferProgress = progress) }
             }
             .launchIn(viewModelScope)
+
+        transferRepository.fileVerifiedFlow
+            .onEach { result ->
+                if (result != null) {
+                    val (index, isValid) = result
+                    onPhotoVerified(index, isValid)
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun onPhotoVerified(index: Int, isValid: Boolean) {
+        if (!isValid) {
+            _uiState.update {
+                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
+            }
+        } else {
+            val allReceiving = _uiState.value.receivingPhotos
+            if (index < allReceiving.size) {
+                val photoUri = allReceiving[index]
+                viewModelScope.launch {
+                    delay(100)
+                    _uiState.update { state ->
+                        state.copy(
+                            photos = (state.photos + photoUri).distinct(),
+                            receivingPhotos = state.receivingPhotos - photoUri
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun loadGalleryPhotos(context: Context) {
@@ -168,15 +201,19 @@ class WorkbenchViewModel(
     private fun onTransferStateChanged(state: TransferState) {
         when (state) {
             is TransferState.Complete -> {
-                val fileUris = state.receivedFiles.map { file ->
+                val allFileUris = state.receivedFiles.map { file ->
                     android.net.Uri.fromFile(file)
                 }
+                val corruptedSet = state.corruptedIndices.toSet()
+                val corruptedPhotos = allFileUris.filterIndexed { idx, _ -> idx in corruptedSet }
+
                 _uiState.update {
                     it.copy(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivingPhotos = fileUris
+                        receivingPhotos = allFileUris,
+                        corruptedPhotos = corruptedPhotos
                     )
                 }
             }
@@ -216,5 +253,17 @@ class WorkbenchViewModel(
 
     fun onExitRequested() {
         _uiState.update { it.copy(shouldExit = true) }
+    }
+
+    fun dismissCorruptionAlert() {
+        _uiState.update { it.copy(corruptedPhotos = emptyList()) }
+    }
+
+    fun retryCorruptedPhotos(context: Context) {
+        val currentState = _uiState.value
+        if (currentState.corruptedPhotos.isNotEmpty()) {
+            dismissCorruptionAlert()
+            _uiState.update { it.copy(nfcState = NfcUiState.Idle) }
+        }
     }
 }

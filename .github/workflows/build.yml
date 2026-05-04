@@ -32,7 +32,8 @@ jobs:
         run: |
           VERSION=$(./gradlew -q printVersionName --no-daemon)
           SHORT_SHA="${GITHUB_SHA::7}"
-          echo "tag=v${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          TAG_VERSION=$(echo "$VERSION" | sed 's/[, ]/-/g')
+          echo "tag=v${TAG_VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "name=Flash v${VERSION} (${SHORT_SHA})" >> $GITHUB_OUTPUT
 
       - name: Create Release & upload APK

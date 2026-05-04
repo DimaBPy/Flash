@@ -50,7 +50,7 @@ import kotlin.math.sin
 
 private const val CONTROL_POINTS  = 16
 private const val BASE_RADIUS_DP  = 60f
-private const val NOISE_OFFSET_DP = 14f
+private const val NOISE_OFFSET_DP = 20f
 
 @Composable
 fun MotherCore(
@@ -72,7 +72,7 @@ fun MotherCore(
         targetValue   = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(2_700, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
+            repeatMode = RepeatMode.Restart
         ),
         label         = "timeFraction"
     )

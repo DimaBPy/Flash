@@ -15,7 +15,11 @@ sealed interface TransferState {
     object Idle : TransferState
     data class Serving(val port: Int, val token: String) : TransferState
     data class Downloading(val progress: Float) : TransferState
-    data class Complete(val receivedFiles: List<File>) : TransferState
+    data class Complete(
+        val receivedFiles: List<File>,
+        val corruptedFiles: List<String> = emptyList(),
+        val corruptedIndices: List<Int> = emptyList()
+    ) : TransferState
     data class Failed(val reason: String) : TransferState
 }
 
@@ -30,6 +34,9 @@ class TransferRepository(
 
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
+
+    private val _fileVerifiedFlow = MutableStateFlow<Pair<Int, Boolean>?>(null)
+    val fileVerifiedFlow: StateFlow<Pair<Int, Boolean>?> = _fileVerifiedFlow.asStateFlow()
 
     private var downloadJob: Job? = null
 
@@ -54,10 +61,22 @@ class TransferRepository(
                 _transferState.value = TransferState.Downloading(0f)
 
                 val destDir = File(context.cacheDir, "transfers")
-                val files = client.downloadAll(ip, port, token, fileCount, destDir) { progress ->
-                    _progressFlow.value = progress
-                    _transferState.value = TransferState.Downloading(progress)
-                }
+                val files = client.downloadAll(
+                    ip, port, token, fileCount, destDir,
+                    onProgress = { progress ->
+                        _progressFlow.value = progress
+                        _transferState.value = TransferState.Downloading(progress)
+                    },
+                    onFileVerified = { index, isValid ->
+                        _fileVerifiedFlow.value = index to isValid
+                    },
+                    onCorrupted = { corrupted, indices ->
+                        val current = _transferState.value
+                        if (current is TransferState.Complete) {
+                            _transferState.value = current.copy(corruptedFiles = corrupted, corruptedIndices = indices)
+                        }
+                    }
+                )
 
                 _transferState.value = TransferState.Complete(files)
             } catch (e: CancellationException) {
