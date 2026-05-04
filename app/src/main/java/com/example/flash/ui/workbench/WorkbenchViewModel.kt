@@ -2,6 +2,8 @@ package com.example.flash.ui.workbench
 
 import android.content.ContentUris
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
@@ -40,7 +42,11 @@ data class WorkbenchUiState(
     val showRipple: Boolean      = false,
     val shouldExit: Boolean      = false,
     val receivedPhotos: List<Uri> = emptyList(),
-    val receivingPhotos: List<Uri> = emptyList()
+    val receivingPhotos: List<Uri> = emptyList(),
+    val corruptedPhotos: List<Uri> = emptyList(),
+    val corruptedIndicesInOrbit: Set<Int> = emptySet(),
+    val isWifiConnected: Boolean = false,
+    val showHotspotPrompt: Boolean = false
 )
 
 class WorkbenchViewModel(
@@ -69,6 +75,61 @@ class WorkbenchViewModel(
                 _uiState.update { it.copy(transferProgress = progress) }
             }
             .launchIn(viewModelScope)
+
+        transferRepository.fileVerifiedFlow
+            .onEach { result ->
+                if (result != null) {
+                    val (index, isValid) = result
+                    onPhotoVerified(index, isValid)
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun onPhotoVerified(index: Int, isValid: Boolean) {
+        if (!isValid) {
+            _uiState.update {
+                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
+            }
+        } else {
+            val allReceiving = _uiState.value.receivingPhotos
+            if (index < allReceiving.size) {
+                val photoUri = allReceiving[index]
+                viewModelScope.launch {
+                    delay(100)
+                    _uiState.update { state ->
+                        state.copy(
+                            photos = (state.photos + photoUri).distinct(),
+                            receivingPhotos = state.receivingPhotos - photoUri
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isWifiConnected(context: Context): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    fun updateWifiStatus(context: Context) {
+        val connected = isWifiConnected(context)
+        _uiState.update { it.copy(isWifiConnected = connected) }
+        checkHotspotPromptVisibility()
+    }
+
+    private fun checkHotspotPromptVisibility() {
+        val state = _uiState.value
+        val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
+        _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
+    }
+
+    fun dismissHotspotPrompt() {
+        _uiState.update { it.copy(showHotspotPrompt = false) }
     }
 
     fun loadGalleryPhotos(context: Context) {
@@ -94,18 +155,20 @@ class WorkbenchViewModel(
         }
     }
 
-    fun onPhotosSelected(uris: List<Uri>) {
+    fun onPhotosSelected(uris: List<Uri>, context: Context) {
         _uiState.update {
             it.copy(
                 photos = (it.photos + uris).distinct(),
                 selectedPhotos = it.selectedPhotos + uris
             )
         }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(uris)
     }
 
-    fun onPhotoAddedToOrbit(uri: Uri) {
+    fun onPhotoAddedToOrbit(uri: Uri, context: Context) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(listOf(uri))
     }
 
@@ -151,6 +214,7 @@ class WorkbenchViewModel(
 
     fun onPhotoDraggedToCore(uri: Uri, context: Context) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(listOf(uri))
     }
 
@@ -168,15 +232,19 @@ class WorkbenchViewModel(
     private fun onTransferStateChanged(state: TransferState) {
         when (state) {
             is TransferState.Complete -> {
-                val fileUris = state.receivedFiles.map { file ->
+                val allFileUris = state.receivedFiles.map { file ->
                     android.net.Uri.fromFile(file)
                 }
+                val corruptedSet = state.corruptedIndices.toSet()
+                val corruptedPhotos = allFileUris.filterIndexed { idx, _ -> idx in corruptedSet }
+
                 _uiState.update {
                     it.copy(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivingPhotos = fileUris
+                        receivingPhotos = allFileUris,
+                        corruptedPhotos = corruptedPhotos
                     )
                 }
             }
@@ -216,5 +284,17 @@ class WorkbenchViewModel(
 
     fun onExitRequested() {
         _uiState.update { it.copy(shouldExit = true) }
+    }
+
+    fun dismissCorruptionAlert() {
+        _uiState.update { it.copy(corruptedPhotos = emptyList()) }
+    }
+
+    fun retryCorruptedPhotos(context: Context) {
+        val currentState = _uiState.value
+        if (currentState.corruptedPhotos.isNotEmpty()) {
+            dismissCorruptionAlert()
+            _uiState.update { it.copy(nfcState = NfcUiState.Idle) }
+        }
     }
 }

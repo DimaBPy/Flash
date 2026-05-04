@@ -21,4 +21,15 @@
     <string name="cd_core">Главное ядро</string>
     <string name="hce_service_desc">Служба рукопожатия Flash</string>
     <string name="hce_aid_group_desc">NFC рукопожатие Flash</string>
+    <string name="corruption_title">Сеть сказала спасибо, нет</string>
+    <string name="corruption_subtitle">Эти фото не пережили путь</string>
+    <string name="corruption_description">Удалены, чтобы пожалеть вас. Сеть сказала, что они подозрительные.</string>
+    <string name="corruption_question">Хотите попробовать ещё раз?</string>
+    <string name="corruption_button_skip">Нет, все нормально)</string>
+    <string name="corruption_button_retry">Да, абсолютно, я их не хочу потерять!</string>
+    <string name="hotspot_title">Нет Wi-Fi?</string>
+    <string name="hotspot_subtitle">Можем использовать точку доступа</string>
+    <string name="hotspot_description">Поделитесь интернетом с другим устройством, а мы позаботимся об остальном. Это самый быстрый способ обменяться фото.</string>
+    <string name="hotspot_button_enable">Включить точку доступа</string>
+    <string name="hotspot_button_cancel">Не сейчас</string>
 </resources>
