@@ -23,7 +23,7 @@
     <string name="hce_aid_group_desc">NFC рукопожатие Flash</string>
     <string name="corruption_title">Сеть сказала спасибо, нет</string>
     <string name="corruption_subtitle">Эти фото не пережили путь</string>
-    <string name="corruption_description">Удалены, чтобы пожалеть вас. Сеть сказала, что они sus.</string>
+    <string name="corruption_description">Удалены, чтобы пожалеть вас. Сеть сказала, что они подозрительные.</string>
     <string name="corruption_question">Хотите попробовать ещё раз?</string>
     <string name="corruption_button_skip">Нет, все нормально)</string>
     <string name="corruption_button_retry">Да, абсолютно, я их не хочу потерять!</string>
