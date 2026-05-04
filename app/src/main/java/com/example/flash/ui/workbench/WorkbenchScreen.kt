@@ -311,7 +311,7 @@ fun WorkbenchScreen(
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
             shouldExit       = uiState.shouldExit,
-            corruptedIndices = uiState.corruptedIndicesInOrbit
+            corruptedPhotos  = uiState.corruptedPhotos
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
@@ -464,7 +464,7 @@ fun WorkbenchScreen(
             corruptedPhotos = uiState.corruptedPhotos,
             backdrop = backdrop,
             onDismiss = { viewModel.dismissCorruptionAlert() },
-            onRetry = { viewModel.retryCorruptedPhotos(context) }
+            onRetry = { viewModel.retryCorruptedPhotos() }
         )
         } // end sliding Box
 
@@ -940,7 +940,7 @@ private fun CorruptionAlert(
                         contentAlignment = Alignment.Center
                     ) {
                         corruptedPhotos.forEachIndexed { index, uri ->
-                            val angle = (index / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
+                            val angle = (index.toFloat() / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
                             val radiusPx = 70f
                             val offsetX = (radiusPx * kotlin.math.cos(angle)).toInt()
                             val offsetY = (radiusPx * kotlin.math.sin(angle)).toInt()
@@ -1034,6 +1034,7 @@ private fun CorruptionAlert(
 }
 
 // ── Hotspot Prompt Modal ──────────────────────────────────────────────────
+/** Animated modal prompting user to enable hotspot when selecting photos without Wi-Fi. */
 @Composable
 private fun HotspotPromptModal(
     visible: Boolean,

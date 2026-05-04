@@ -44,7 +44,6 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
-    val corruptedIndicesInOrbit: Set<Int> = emptySet(),
     val isWifiConnected: Boolean = false,
     val showHotspotPrompt: Boolean = false
 )
@@ -77,37 +76,32 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
 
         transferRepository.fileVerifiedFlow
-            .onEach { result ->
-                if (result != null) {
-                    val (index, isValid) = result
-                    onPhotoVerified(index, isValid)
-                }
+            .onEach { (index, uri, isValid) ->
+                onPhotoVerified(index, uri, isValid)
             }
             .launchIn(viewModelScope)
     }
 
-    private fun onPhotoVerified(index: Int, isValid: Boolean) {
+    /** Handle file verification result: track corruption. */
+    private fun onPhotoVerified(index: Int, uri: Uri, isValid: Boolean) {
         if (!isValid) {
             _uiState.update {
-                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
+                it.copy(corruptedPhotos = it.corruptedPhotos + uri)
             }
         } else {
-            val allReceiving = _uiState.value.receivingPhotos
-            if (index < allReceiving.size) {
-                val photoUri = allReceiving[index]
-                viewModelScope.launch {
-                    delay(100)
-                    _uiState.update { state ->
-                        state.copy(
-                            photos = (state.photos + photoUri).distinct(),
-                            receivingPhotos = state.receivingPhotos - photoUri
-                        )
-                    }
+            viewModelScope.launch {
+                delay(100)
+                _uiState.update { state ->
+                    state.copy(
+                        photos = (state.photos + uri).distinct(),
+                        receivingPhotos = state.receivingPhotos - uri
+                    )
                 }
             }
         }
     }
 
+    /** Check if the device has an active Wi-Fi connection. */
     private fun isWifiConnected(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
@@ -116,18 +110,21 @@ class WorkbenchViewModel(
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
+    /** Update Wi-Fi connectivity status and recompute hotspot prompt visibility. */
     fun updateWifiStatus(context: Context) {
         val connected = isWifiConnected(context)
         _uiState.update { it.copy(isWifiConnected = connected) }
         checkHotspotPromptVisibility()
     }
 
+    /** Show hotspot prompt only when photos are selected, Wi-Fi is down, and not receiving. */
     private fun checkHotspotPromptVisibility() {
         val state = _uiState.value
         val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
         _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
     }
 
+    /** Hide the hotspot prompt modal. */
     fun dismissHotspotPrompt() {
         _uiState.update { it.copy(showHotspotPrompt = false) }
     }
@@ -174,6 +171,7 @@ class WorkbenchViewModel(
 
     fun onPhotoRemovedFromOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos - uri) }
+        checkHotspotPromptVisibility()
         if (_uiState.value.selectedPhotos.isEmpty()) {
             nfcManager.clearOutboundHandshake()
             currentPort = 0
@@ -290,7 +288,7 @@ class WorkbenchViewModel(
         _uiState.update { it.copy(corruptedPhotos = emptyList()) }
     }
 
-    fun retryCorruptedPhotos(context: Context) {
+    fun retryCorruptedPhotos() {
         val currentState = _uiState.value
         if (currentState.corruptedPhotos.isNotEmpty()) {
             dismissCorruptionAlert()
