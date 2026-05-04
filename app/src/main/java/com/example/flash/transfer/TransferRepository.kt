@@ -5,8 +5,11 @@ import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
@@ -31,11 +34,10 @@ class TransferRepository(
     private val _progressFlow = MutableStateFlow(0f)
     val progressFlow: StateFlow<Float> = _progressFlow.asStateFlow()
 
-    private val _fileVerifiedFlow = MutableStateFlow<Triple<Int, android.net.Uri, Boolean>?>(null)
-    val fileVerifiedFlow: StateFlow<Triple<Int, android.net.Uri, Boolean>?> = _fileVerifiedFlow.asStateFlow()
+    private val _fileVerifiedFlow = MutableSharedFlow<Triple<Int, android.net.Uri, Boolean>>(replay = 0, extraBufferCapacity = 100)
+    val fileVerifiedFlow: SharedFlow<Triple<Int, android.net.Uri, Boolean>> = _fileVerifiedFlow.asSharedFlow()
 
     private var downloadJob: Job? = null
-    private val corruptedIndices = mutableListOf<Int>()
 
     val servingFileCount: Int get() = server.fileCount
 
@@ -52,7 +54,6 @@ class TransferRepository(
 
     fun startDownload(ip: String, port: Int, token: String, fileCount: Int, context: Context) {
         downloadJob?.cancel()
-        corruptedIndices.clear()
         downloadJob = scope.launch {
             try {
                 _progressFlow.value = 0f
@@ -65,10 +66,11 @@ class TransferRepository(
                 }
 
                 // Verify downloaded files
+                val corruptedIndices = mutableListOf<Int>()
                 files.forEachIndexed { index, file ->
                     val isValid = verifyFile(file)
                     val fileUri = android.net.Uri.fromFile(file)
-                    _fileVerifiedFlow.value = Triple(index, fileUri, isValid)
+                    _fileVerifiedFlow.emit(Triple(index, fileUri, isValid))
                     if (!isValid) {
                         corruptedIndices.add(index)
                     }
@@ -98,8 +100,6 @@ class TransferRepository(
         server.stop()
         _transferState.value = TransferState.Idle
         _progressFlow.value = 0f
-        _fileVerifiedFlow.value = null
-        corruptedIndices.clear()
     }
 
     fun reset() {

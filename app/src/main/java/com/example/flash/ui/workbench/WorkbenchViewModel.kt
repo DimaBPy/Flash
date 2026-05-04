@@ -76,11 +76,8 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
 
         transferRepository.fileVerifiedFlow
-            .onEach { result ->
-                if (result != null) {
-                    val (index, uri, isValid) = result
-                    onPhotoVerified(index, uri, isValid)
-                }
+            .onEach { (index, uri, isValid) ->
+                onPhotoVerified(index, uri, isValid)
             }
             .launchIn(viewModelScope)
     }
