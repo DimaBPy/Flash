@@ -6,6 +6,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -92,7 +93,11 @@ fun PhotoOrbit(
         label = "radial_drift"
     )
 
-    val transferIntensity = transferProgress * 0.3f
+    val transferIntensity by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = transferProgress * 0.3f,
+        animationSpec = tween(200),
+        label = "transfer_intensity"
+    )
     val baseOrbitRadiusPx = with(density) { (100.dp + (30.dp * transferIntensity)).toPx() }
     val photoSizeDp = 56.dp
     val photoSizePx = with(density) { photoSizeDp.toPx() }
