@@ -2,6 +2,8 @@ package com.example.flash.ui.workbench
 
 import android.content.ContentUris
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
@@ -42,7 +44,9 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
-    val corruptedIndicesInOrbit: Set<Int> = emptySet()
+    val corruptedIndicesInOrbit: Set<Int> = emptySet(),
+    val isWifiConnected: Boolean = false,
+    val showHotspotPrompt: Boolean = false
 )
 
 class WorkbenchViewModel(
@@ -104,6 +108,30 @@ class WorkbenchViewModel(
         }
     }
 
+    private fun isWifiConnected(context: Context): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    fun updateWifiStatus(context: Context) {
+        val connected = isWifiConnected(context)
+        _uiState.update { it.copy(isWifiConnected = connected) }
+        checkHotspotPromptVisibility()
+    }
+
+    private fun checkHotspotPromptVisibility() {
+        val state = _uiState.value
+        val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
+        _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
+    }
+
+    fun dismissHotspotPrompt() {
+        _uiState.update { it.copy(showHotspotPrompt = false) }
+    }
+
     fun loadGalleryPhotos(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val photos = mutableListOf<Uri>()
@@ -127,18 +155,20 @@ class WorkbenchViewModel(
         }
     }
 
-    fun onPhotosSelected(uris: List<Uri>) {
+    fun onPhotosSelected(uris: List<Uri>, context: Context) {
         _uiState.update {
             it.copy(
                 photos = (it.photos + uris).distinct(),
                 selectedPhotos = it.selectedPhotos + uris
             )
         }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(uris)
     }
 
-    fun onPhotoAddedToOrbit(uri: Uri) {
+    fun onPhotoAddedToOrbit(uri: Uri, context: Context) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(listOf(uri))
     }
 
@@ -184,6 +214,7 @@ class WorkbenchViewModel(
 
     fun onPhotoDraggedToCore(uri: Uri, context: Context) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(listOf(uri))
     }
 
