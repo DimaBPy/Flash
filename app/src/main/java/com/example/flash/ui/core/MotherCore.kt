@@ -67,15 +67,16 @@ fun MotherCore(
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     val infiniteTransition = rememberInfiniteTransition(label = "core")
-    val time by infiniteTransition.animateFloat(
+    val timeFraction by infiniteTransition.animateFloat(
         initialValue  = 0f,
-        targetValue   = 1000f,
+        targetValue   = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(2_700, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label         = "time"
+        label         = "timeFraction"
     )
+    val time = timeFraction * 1000f
 
     val hollowProgress by animateFloatAsState(
         targetValue   = if (isReceiving) progress else 0f,
@@ -110,7 +111,9 @@ fun MotherCore(
         }
     }
 
-    val blobSize   = (BASE_RADIUS_DP * 2 + NOISE_OFFSET_DP * 2 + 32f).dp
+    val transferIntensity = (progress * 0.5f)
+    val intensifiedNoiseOffset = NOISE_OFFSET_DP + (5f * transferIntensity)
+    val blobSize   = (BASE_RADIUS_DP * 2 + intensifiedNoiseOffset * 2 + 20f).dp
     val combinedSx = spawnScale.value * exitScale.value
     val combinedTx = spawnTx.value   + exitTx.value
     val combinedTy = spawnTy.value   + exitTy.value
@@ -126,7 +129,7 @@ fun MotherCore(
             }
     ) {
         val baseRPx  = with(density) { BASE_RADIUS_DP.dp.toPx() }
-        val noiseRPx = with(density) { NOISE_OFFSET_DP.dp.toPx() }
+        val noiseRPx = with(density) { intensifiedNoiseOffset.dp.toPx() }
         val blobCx   = with(density) { blobSize.toPx() / 2f }
 
         val blobPath = remember(time, baseRPx, noiseRPx, blobCx) {
