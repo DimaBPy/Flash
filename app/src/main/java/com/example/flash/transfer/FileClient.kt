@@ -88,6 +88,9 @@ class FileClient {
                     }
                 }
                 if (corruptedFiles.isNotEmpty()) {
+                    corruptedFiles.forEach { fileName ->
+                        files.filterNotNull().find { it.name == fileName }?.delete()
+                    }
                     onCorrupted(corruptedFiles.toList())
                 }
             }

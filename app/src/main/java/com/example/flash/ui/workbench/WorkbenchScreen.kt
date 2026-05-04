@@ -47,6 +47,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -431,6 +434,80 @@ fun WorkbenchScreen(
                 coreCenter = coreCenter,
                 onComplete = { viewModel.onRippleComplete() }
             )
+        }
+
+        // ── Corruption alert ─────────────────────────────────────────────────
+        AnimatedVisibility(
+            visible = uiState.corruptedFileNames.isNotEmpty(),
+            enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.9f),
+            exit    = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.9f),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(32.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "⚠️ Corrupted Files",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = "${uiState.corruptedFileNames.size} file(s) failed integrity check and were deleted",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.2f),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 120.dp)
+                    ) {
+                        items(uiState.corruptedFileNames) { fileName ->
+                            Text(
+                                text = "• $fileName",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                maxLines = 1,
+                                overflow = androidx.compose.foundation.text.TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+                    }
+                    LiquidButton(
+                        onClick      = { viewModel.dismissCorruptionAlert() },
+                        backdrop     = backdrop,
+                        enabled      = true,
+                        surfaceColor = MaterialTheme.colorScheme.error.copy(alpha = 0.3f),
+                        modifier     = Modifier
+                            .padding(top = 12.dp)
+                            .width(100.dp)
+                    ) {
+                        Text(
+                            text = "Dismiss",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
         }
         } // end sliding Box
 

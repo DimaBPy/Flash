@@ -40,7 +40,8 @@ data class WorkbenchUiState(
     val showRipple: Boolean      = false,
     val shouldExit: Boolean      = false,
     val receivedPhotos: List<Uri> = emptyList(),
-    val receivingPhotos: List<Uri> = emptyList()
+    val receivingPhotos: List<Uri> = emptyList(),
+    val corruptedFileNames: List<String> = emptyList()
 )
 
 class WorkbenchViewModel(
@@ -176,7 +177,8 @@ class WorkbenchViewModel(
                         nfcState = NfcUiState.Complete,
                         transferProgress = 1f,
                         showRipple = true,
-                        receivingPhotos = fileUris
+                        receivingPhotos = fileUris,
+                        corruptedFileNames = state.corruptedFiles
                     )
                 }
             }
@@ -216,5 +218,9 @@ class WorkbenchViewModel(
 
     fun onExitRequested() {
         _uiState.update { it.copy(shouldExit = true) }
+    }
+
+    fun dismissCorruptionAlert() {
+        _uiState.update { it.copy(corruptedFileNames = emptyList()) }
     }
 }
