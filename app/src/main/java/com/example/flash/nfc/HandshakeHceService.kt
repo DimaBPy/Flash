@@ -10,11 +10,12 @@ import android.os.Bundle
 class HandshakeHceService : HostApduService() {
 
     companion object {
-        // AID for NFC Forum Type 4 Tag
+        // Custom proprietary AID (F0394D4B03) to avoid conflicts with system NFC tag service
+        // Proprietary range: bits 8-5 of first byte set to '1' (F0 = 1111 0000)
         private val AID_T4T = byteArrayOf(
-            0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte(), 0x07.toByte(),
-            0xD2.toByte(), 0x76.toByte(), 0x00.toByte(), 0x00.toByte(), 0x85.toByte(),
-            0x01.toByte(), 0x01.toByte(), 0x00.toByte()
+            0x00.toByte(), 0xA4.toByte(), 0x04.toByte(), 0x00.toByte(), 0x03.toByte(),
+            0xF0.toByte(), 0x39.toByte(), 0x4D.toByte(), 0x4B.toByte(), 0x03.toByte(),
+            0x00.toByte()
         )
 
         private val SELECT_CC_FILE = byteArrayOf(
