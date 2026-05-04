@@ -310,8 +310,7 @@ fun WorkbenchScreen(
             coreCenter       = coreCenter,
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
-            shouldExit       = uiState.shouldExit,
-            corruptedIndices = uiState.corruptedIndicesInOrbit
+            shouldExit       = uiState.shouldExit
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
@@ -459,13 +458,6 @@ fun WorkbenchScreen(
             }
         )
 
-        // ── Corruption alert modal ──────────────────────────────────────────
-        CorruptionAlert(
-            corruptedPhotos = uiState.corruptedPhotos,
-            backdrop = backdrop,
-            onDismiss = { viewModel.dismissCorruptionAlert() },
-            onRetry = { viewModel.retryCorruptedPhotos(context) }
-        )
         } // end sliding Box
 
         // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
