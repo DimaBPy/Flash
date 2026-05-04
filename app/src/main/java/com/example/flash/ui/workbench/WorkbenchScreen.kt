@@ -19,7 +19,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -47,6 +50,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -78,8 +84,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -252,7 +260,7 @@ fun WorkbenchScreen(
     // Close settings panel on back press
     BackHandler(enabled = showSettings) { showSettings = false }
 
-    val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
+    val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris, context) }
 
     // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
@@ -290,7 +298,7 @@ fun WorkbenchScreen(
                     isInOrbit = uri in uiState.selectedPhotos,
                     onTap = {
                         if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
-                        else                               viewModel.onPhotoAddedToOrbit(uri)
+                        else                               viewModel.onPhotoAddedToOrbit(uri, context)
                     }
                 )
             }
@@ -302,7 +310,8 @@ fun WorkbenchScreen(
             coreCenter       = coreCenter,
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
-            shouldExit       = uiState.shouldExit
+            shouldExit       = uiState.shouldExit,
+            corruptedIndices = uiState.corruptedIndicesInOrbit
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
@@ -432,6 +441,31 @@ fun WorkbenchScreen(
                 onComplete = { viewModel.onRippleComplete() }
             )
         }
+
+        // ── Update Wi-Fi status periodically ────────────────────────────────────
+        LaunchedEffect(Unit) {
+            viewModel.updateWifiStatus(context)
+        }
+
+        // ── Hotspot prompt modal ────────────────────────────────────────────────
+        HotspotPromptModal(
+            visible = uiState.showHotspotPrompt,
+            backdrop = backdrop,
+            onDismiss = { viewModel.dismissHotspotPrompt() },
+            onEnable = {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                context.startActivity(intent)
+                viewModel.dismissHotspotPrompt()
+            }
+        )
+
+        // ── Corruption alert modal ──────────────────────────────────────────
+        CorruptionAlert(
+            corruptedPhotos = uiState.corruptedPhotos,
+            backdrop = backdrop,
+            onDismiss = { viewModel.dismissCorruptionAlert() },
+            onRetry = { viewModel.retryCorruptedPhotos(context) }
+        )
         } // end sliding Box
 
         // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
@@ -828,6 +862,300 @@ private fun PhotoGridItem(
             Box(modifier = Modifier
                 .fillMaxSize()
                 .background(OceanAqua.copy(alpha = 0.35f)))
+        }
+    }
+}
+
+// ── Corruption Alert Modal ──────────────────────────────────────────────────
+@Composable
+private fun CorruptionAlert(
+    corruptedPhotos: List<Uri>,
+    backdrop: Backdrop,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit
+) {
+    val density = LocalDensity.current
+
+    AnimatedVisibility(
+        visible = corruptedPhotos.isNotEmpty(),
+        enter   = fadeIn(tween(400, delayMillis = 500)) + scaleIn(tween(400, delayMillis = 500), initialScale = 0.85f),
+        exit    = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.9f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .wrapContentHeight()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                    )
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedCornerShape(20.dp) },
+                        effects = {
+                            vibrancy()
+                            blur(6f.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(OceanAqua.copy(alpha = 0.05f))
+                        }
+                    )
+                    .padding(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = stringResource(R.string.corruption_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_subtitle),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    // Corrupted photos as circles in circular arrangement
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        corruptedPhotos.forEachIndexed { index, uri ->
+                            val angle = (index / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
+                            val radiusPx = 70f
+                            val offsetX = (radiusPx * kotlin.math.cos(angle)).toInt()
+                            val offsetY = (radiusPx * kotlin.math.sin(angle)).toInt()
+
+                            Box(
+                                modifier = Modifier
+                                    .size(60.dp)
+                                    .offset(offsetX.dp, offsetY.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
+                            ) {
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .alpha(0.7f)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Red.copy(alpha = 0.3f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✕",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = stringResource(R.string.corruption_question),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.corruption_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        LiquidButton(
+                            onClick      = onDismiss,
+                            backdrop     = backdrop,
+                            enabled      = true,
+                            surfaceColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            modifier     = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.corruption_button_skip),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        LiquidButton(
+                            onClick      = onRetry,
+                            backdrop     = backdrop,
+                            enabled      = true,
+                            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            modifier     = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.corruption_button_retry),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Hotspot Prompt Modal ──────────────────────────────────────────────────
+@Composable
+private fun HotspotPromptModal(
+    visible: Boolean,
+    backdrop: Backdrop,
+    onDismiss: () -> Unit,
+    onEnable: () -> Unit
+) {
+    val scaleAnim = remember { Animatable(0.25f) }
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            scaleAnim.snapTo(0.25f)
+            scaleAnim.animateTo(1f, tween(600, easing = FastOutSlowInEasing))
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.3f),
+        exit = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.3f),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.4f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .wrapContentHeight()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+                    )
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedCornerShape(24.dp) },
+                        effects = {
+                            vibrancy()
+                            blur(8f.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(OceanAqua.copy(alpha = 0.08f))
+                        }
+                    )
+                    .graphicsLayer {
+                        scaleX = scaleAnim.value
+                        scaleY = scaleAnim.value
+                    }
+                    .padding(28.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = stringResource(R.string.hotspot_title),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.hotspot_subtitle),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    Text(
+                        text = stringResource(R.string.hotspot_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        LiquidButton(
+                            onClick = onDismiss,
+                            backdrop = backdrop,
+                            enabled = true,
+                            surfaceColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.hotspot_button_cancel),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        LiquidButton(
+                            onClick = onEnable,
+                            backdrop = backdrop,
+                            enabled = true,
+                            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.hotspot_button_enable),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
