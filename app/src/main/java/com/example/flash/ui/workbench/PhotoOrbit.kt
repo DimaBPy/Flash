@@ -58,7 +58,7 @@ fun PhotoOrbit(
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
     shouldExit: Boolean = false,
-    corruptedIndices: Set<Int> = emptySet()
+    corruptedPhotos: List<Uri> = emptyList()
 ) {
     val density = LocalDensity.current
 
@@ -144,6 +144,7 @@ fun PhotoOrbit(
                 val phaseOffset = phaseMap[uri] ?: 0f
                 val isExiting = uri in exitingPhotos || shouldExit
                 val isReceiving = uri in receivingPhotos
+                val isCorrupted = uri in corruptedPhotos
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -156,6 +157,7 @@ fun PhotoOrbit(
                     photoSizePx = photoSizePx,
                     isExiting = isExiting,
                     isReceiving = isReceiving,
+                    isCorrupted = isCorrupted,
                     successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
                     transferProgress = transferProgress,
                     onExitComplete = {
@@ -182,6 +184,7 @@ private fun OrbitPhotoItem(
     photoSizePx: Float,
     isExiting: Boolean,
     isReceiving: Boolean = false,
+    isCorrupted: Boolean = false,
     successProgress: Float = 0f,
     transferProgress: Float = 0f,
     onExitComplete: () -> Unit
@@ -277,6 +280,19 @@ private fun OrbitPhotoItem(
                     )
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
+                    }
+
+                    // Corruption indicator: red overlay for corrupted photos
+                    if (isCorrupted) {
+                        drawRect(
+                            color = Color.Red.copy(alpha = 0.3f),
+                            size = size
+                        )
+                        drawCircle(
+                            color = Color.Red.copy(alpha = 0.6f),
+                            radius = size.width * 0.15f,
+                            center = Offset(size.width / 2f, size.height / 2f)
+                        )
                     }
                 }
             }

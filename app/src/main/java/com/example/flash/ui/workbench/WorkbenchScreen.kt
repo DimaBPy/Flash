@@ -311,7 +311,7 @@ fun WorkbenchScreen(
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
             shouldExit       = uiState.shouldExit,
-            corruptedIndices = uiState.corruptedIndicesInOrbit
+            corruptedPhotos  = uiState.corruptedPhotos
         )
 
         // ── Received photos materializing into orbit ─────────────────────────
