@@ -189,6 +189,24 @@ fun WorkbenchScreen(
         }
     }
 
+    // ── NFC Reader Mode (HyperOS 3 workaround) ──────────────────────────────
+    // On HyperOS 3, reader mode bypasses system NFC routing that intercepts HCE.
+    // Enable reader mode when no outbound handshake (receiver side) to actively read sender's HCE.
+    LaunchedEffect(uiState.nfcState) {
+        val act = context as? android.app.Activity ?: return@LaunchedEffect
+        val hasOutbound = uiState.selectedPhotos.isNotEmpty()
+
+        if (!hasOutbound) {
+            // Receiver mode: enable reader mode to bypass HyperOS payment routing
+            nfcManager.enableReaderMode(act) { ndefMessage ->
+                nfcManager.handleNdefMessage(ndefMessage)
+            }
+        } else {
+            // Sender mode: disable reader mode
+            nfcManager.disableReaderMode(act)
+        }
+    }
+
     // ── Permission + auto-load camera roll ───────────────────────────────────
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
