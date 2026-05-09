@@ -192,7 +192,7 @@ fun WorkbenchScreen(
     // ── NFC Reader Mode (HyperOS 3 workaround) ──────────────────────────────
     // On HyperOS 3, reader mode bypasses system NFC routing that intercepts HCE.
     // Enable reader mode when no outbound handshake (receiver side) to actively read sender's HCE.
-    LaunchedEffect(uiState.nfcState) {
+    LaunchedEffect(uiState.nfcState, uiState.selectedPhotos) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         val hasOutbound = uiState.selectedPhotos.isNotEmpty()
 
