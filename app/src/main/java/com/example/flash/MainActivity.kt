@@ -3,6 +3,7 @@ package com.example.flash
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.IntentFilter
+import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
