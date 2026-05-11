@@ -8,6 +8,8 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.flash.handshake.CameraHandshakeManager
+import com.example.flash.handshake.ColorHandshake
 import com.example.flash.nfc.NfcManager
 import com.example.flash.nfc.PeerHandshake
 import com.example.flash.transfer.TransferRepository
@@ -32,6 +34,8 @@ sealed interface NfcUiState {
     data class Error(val message: String) : NfcUiState
 }
 
+enum class ColorDetectionState { Idle, Detecting, Locked }
+
 data class WorkbenchUiState(
     val photos: List<Uri>        = emptyList(),
     val selectedPhotos: Set<Uri> = emptySet(),
@@ -44,13 +48,19 @@ data class WorkbenchUiState(
     val receivedPhotos: List<Uri> = emptyList(),
     val receivingPhotos: List<Uri> = emptyList(),
     val corruptedPhotos: List<Uri> = emptyList(),
+    val corruptedIndicesInOrbit: Set<Int> = emptySet(),
     val isWifiConnected: Boolean = false,
-    val showHotspotPrompt: Boolean = false
+    val showHotspotPrompt: Boolean = false,
+    val displayColor: Int? = null,
+    val detectedPeerColor: ColorHandshake? = null,
+    val colorDetectionState: ColorDetectionState = ColorDetectionState.Idle,
+    val detectionStrength: Float = 0f
 )
 
 class WorkbenchViewModel(
     private val transferRepository: TransferRepository,
-    private val nfcManager: NfcManager
+    private val nfcManager: NfcManager,
+    cameraHandshakeManager: CameraHandshakeManager? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorkbenchUiState())
@@ -59,11 +69,16 @@ class WorkbenchViewModel(
     private var currentToken: String = ""
     private var currentIp: String = ""
     private var currentPort: Int = 0
+    private val cameraHandshakeManager = cameraHandshakeManager
 
     init {
         nfcManager.peerHandshakeFlow
             .onEach { handshake -> onNfcPeerDetected(handshake) }
             .launchIn(viewModelScope)
+
+        cameraHandshakeManager?.colorHandshakeFlow
+            ?.onEach { handshake -> onColorPeerDetected(handshake) }
+            ?.launchIn(viewModelScope)
 
         transferRepository.transferState
             .onEach { state -> onTransferStateChanged(state) }
@@ -76,32 +91,37 @@ class WorkbenchViewModel(
             .launchIn(viewModelScope)
 
         transferRepository.fileVerifiedFlow
-            .onEach { (index, uri, isValid) ->
-                onPhotoVerified(index, uri, isValid)
+            .onEach { result ->
+                if (result != null) {
+                    val (index, isValid) = result
+                    onPhotoVerified(index, isValid)
+                }
             }
             .launchIn(viewModelScope)
     }
 
-    /** Handle file verification result: track corruption. */
-    private fun onPhotoVerified(index: Int, uri: Uri, isValid: Boolean) {
+    private fun onPhotoVerified(index: Int, isValid: Boolean) {
         if (!isValid) {
             _uiState.update {
-                it.copy(corruptedPhotos = it.corruptedPhotos + uri)
+                it.copy(corruptedIndicesInOrbit = it.corruptedIndicesInOrbit + index)
             }
         } else {
-            viewModelScope.launch {
-                delay(100)
-                _uiState.update { state ->
-                    state.copy(
-                        photos = (state.photos + uri).distinct(),
-                        receivingPhotos = state.receivingPhotos - uri
-                    )
+            val allReceiving = _uiState.value.receivingPhotos
+            if (index < allReceiving.size) {
+                val photoUri = allReceiving[index]
+                viewModelScope.launch {
+                    delay(100)
+                    _uiState.update { state ->
+                        state.copy(
+                            photos = (state.photos + photoUri).distinct(),
+                            receivingPhotos = state.receivingPhotos - photoUri
+                        )
+                    }
                 }
             }
         }
     }
 
-    /** Check if the device has an active Wi-Fi connection. */
     private fun isWifiConnected(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
@@ -110,21 +130,18 @@ class WorkbenchViewModel(
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
-    /** Update Wi-Fi connectivity status and recompute hotspot prompt visibility. */
     fun updateWifiStatus(context: Context) {
         val connected = isWifiConnected(context)
         _uiState.update { it.copy(isWifiConnected = connected) }
         checkHotspotPromptVisibility()
     }
 
-    /** Show hotspot prompt only when photos are selected, Wi-Fi is down, and not receiving. */
     private fun checkHotspotPromptVisibility() {
         val state = _uiState.value
         val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
         _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
     }
 
-    /** Hide the hotspot prompt modal. */
     fun dismissHotspotPrompt() {
         _uiState.update { it.copy(showHotspotPrompt = false) }
     }
@@ -174,6 +191,7 @@ class WorkbenchViewModel(
         checkHotspotPromptVisibility()
         if (_uiState.value.selectedPhotos.isEmpty()) {
             nfcManager.clearOutboundHandshake()
+            cameraHandshakeManager?.stopAdvertising()
             currentPort = 0
         }
     }
@@ -185,20 +203,30 @@ class WorkbenchViewModel(
                 val localIp = transferRepository.getLocalIp(context)
 
                 if (currentPort != 0) {
-                    // Server already running — add files without restarting
                     uris.forEach { uri -> transferRepository.addFileToServing(currentToken, uri) }
                     nfcManager.setOutboundHandshake(
                         localIp, currentPort, currentToken, "en",
                         transferRepository.servingFileCount
                     )
+                    cameraHandshakeManager?.startAdvertising(
+                        displayColor = _uiState.value.displayColor ?: 0xFF0000,
+                        port = currentPort,
+                        token = currentToken,
+                        fileCount = transferRepository.servingFileCount
+                    )
                 } else {
-                    // No server yet — start fresh
                     currentToken = UUID.randomUUID().toString()
                     currentIp = localIp
                     currentPort = transferRepository.startServing(currentToken, uris, context)
                     nfcManager.setOutboundHandshake(
                         localIp, currentPort, currentToken, "en",
                         transferRepository.servingFileCount
+                    )
+                    cameraHandshakeManager?.startAdvertising(
+                        displayColor = _uiState.value.displayColor ?: 0xFF0000,
+                        port = currentPort,
+                        token = currentToken,
+                        fileCount = transferRepository.servingFileCount
                     )
                     _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
                 }
@@ -219,6 +247,46 @@ class WorkbenchViewModel(
     private fun onNfcPeerDetected(handshake: PeerHandshake) {
         if (_uiState.value.selectedPhotos.isEmpty()) {
             _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
+        }
+    }
+
+    private fun onColorPeerDetected(handshake: ColorHandshake) {
+        if (_uiState.value.selectedPhotos.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    detectedPeerColor = handshake,
+                    colorDetectionState = ColorDetectionState.Detecting
+                )
+            }
+        }
+    }
+
+    fun onDetectionStrengthChanged(strength: Float) {
+        _uiState.update { it.copy(detectionStrength = strength) }
+    }
+
+    fun onColorLocked() {
+        _uiState.update { it.copy(colorDetectionState = ColorDetectionState.Locked) }
+    }
+
+    fun onColorConfirmed(context: Context) {
+        val handshake = _uiState.value.detectedPeerColor ?: return
+        startDownload(
+            PeerHandshake(
+                ip = handshake.ip,
+                port = handshake.port,
+                token = handshake.token,
+                lang = "en",
+                fileCount = handshake.fileCount
+            ),
+            context
+        )
+        _uiState.update {
+            it.copy(
+                colorDetectionState = ColorDetectionState.Idle,
+                detectedPeerColor = null,
+                detectionStrength = 0f
+            )
         }
     }
 
@@ -275,7 +343,7 @@ class WorkbenchViewModel(
 
     fun startGalleryTransitionForReceivingPhotos() {
         viewModelScope.launch {
-            delay(2100L)  // Wait for gallery flight animation to complete
+            delay(2100L)
             onReceivingPhotosReadyForGallery()
         }
     }
@@ -288,11 +356,34 @@ class WorkbenchViewModel(
         _uiState.update { it.copy(corruptedPhotos = emptyList()) }
     }
 
-    fun retryCorruptedPhotos() {
+    fun retryCorruptedPhotos(context: Context) {
         val currentState = _uiState.value
         if (currentState.corruptedPhotos.isNotEmpty()) {
             dismissCorruptionAlert()
             _uiState.update { it.copy(nfcState = NfcUiState.Idle) }
+        }
+    }
+
+    fun initializeCameraHandshake() {
+        val displayColor = cameraHandshakeManager?.generateDisplayColor() ?: 0xFF0000
+        _uiState.update { it.copy(displayColor = displayColor) }
+    }
+
+    fun startDiscoveringCameraPeers() {
+        cameraHandshakeManager?.startDiscovery()
+    }
+
+    fun stopDiscoveringCameraPeers() {
+        cameraHandshakeManager?.stopDiscovery()
+    }
+
+    fun dismissColorHandshake() {
+        _uiState.update {
+            it.copy(
+                detectedPeerColor = null,
+                colorDetectionState = ColorDetectionState.Idle,
+                detectionStrength = 0f
+            )
         }
     }
 }
