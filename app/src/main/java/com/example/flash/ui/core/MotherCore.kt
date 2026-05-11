@@ -61,6 +61,7 @@ fun MotherCore(
     shouldExit: Boolean = false,
     cutoutOffset: Offset = Offset.Zero,
     backdrop: Backdrop? = null,
+    accentColor: Color? = null,
     onAnimationComplete: () -> Unit = {}
 ) {
     val isDark = isSystemInDarkTheme()
@@ -136,7 +137,6 @@ fun MotherCore(
             buildBlobPath(blobCx, blobCx, baseRPx, noiseRPx, time.toDouble())
         }
 
-        // ── Lens distortion layer: refracts photos behind the blob ───────────
         if (backdrop != null) {
             val blobDiameterDp = with(density) { ((baseRPx + noiseRPx) * 2).toDp() }
             Box(
@@ -175,14 +175,12 @@ fun MotherCore(
             )
         }
 
-        // Animated specular wobble — the highlight drifts slowly across the surface
         val specularShiftX = (sin(time * 0.00063 * PI) * baseRPx * 0.12f).toFloat()
         val specularShiftY = (cos(time * 0.00047 * PI) * baseRPx * 0.09f).toFloat()
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            // ── Blob fill: radial gradient for 3D depth ───────────────────────
-            val lightAqua = Color(0xFF80FFFF)   // top-left highlight
-            val darkTeal  = Color(0xFF003C3C)   // bottom-right shadow
+            val lightAqua = Color(0xFF80FFFF)
+            val darkTeal  = Color(0xFF003C3C)
 
             val blobFill = Brush.radialGradient(
                 colorStops = arrayOf(
@@ -212,7 +210,10 @@ fun MotherCore(
             }
 
             clipPath(blobPath) {
-                // ── Rim light: bright aqua glow on the bottom-right edge ──────
+                if (accentColor != null) {
+                    drawRect(accentColor.copy(alpha = 0.72f))
+                }
+
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(Color.Transparent, AquaPulse.copy(0.55f), Color.Transparent),
@@ -223,7 +224,6 @@ fun MotherCore(
                     center = Offset(center.x + baseRPx * 0.55f, center.y + baseRPx * 0.5f)
                 )
 
-                // ── Primary specular: large soft highlight (top-left), animated ─
                 val spec1Center = Offset(
                     center.x - baseRPx * 0.3f + specularShiftX,
                     center.y - baseRPx * 0.42f + specularShiftY
@@ -242,7 +242,6 @@ fun MotherCore(
                     center = spec1Center
                 )
 
-                // ── Secondary specular: small sharp pinpoint ──────────────────
                 val spec2Center = Offset(
                     center.x - baseRPx * 0.18f + specularShiftX * 0.6f,
                     center.y - baseRPx * 0.32f + specularShiftY * 0.6f
@@ -257,7 +256,6 @@ fun MotherCore(
                     center = spec2Center
                 )
 
-                // ── Depth shadow: subtle dark gradient at the bottom ──────────
                 drawRect(
                     brush = Brush.verticalGradient(
                         colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.18f)),
@@ -267,7 +265,6 @@ fun MotherCore(
                 )
             }
 
-            // ── Glassy rim outline: thin bright ring around the edge ─────────
             drawPath(
                 path  = blobPath,
                 color = Color.White.copy(alpha = 0.22f),
