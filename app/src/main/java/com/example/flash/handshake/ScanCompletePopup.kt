@@ -88,7 +88,7 @@ fun ScanCompletePopup(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
-                        text = "Scanning complete. The color is ${colorName(lockedColor)}, and you no longer need to keep the phones on each other.",
+                        text = "Scanning complete. The color is ${colorName(lockedColor)}. You no longer need to hold the phones together, just keep them on the same Wi-Fi ;)",
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium
                     )
