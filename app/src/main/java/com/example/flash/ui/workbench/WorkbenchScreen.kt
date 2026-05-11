@@ -93,7 +93,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
 import com.example.flash.R
+import com.example.flash.handshake.MotherCoreViewfinder
+import com.example.flash.handshake.ScanCompletePopup
 import com.example.flash.nfc.NfcManager
+import com.example.flash.ui.workbench.ColorDetectionState
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.shader.RippleOverlay
@@ -127,6 +130,7 @@ private val GOLDEN_ANGLE = (kotlin.math.PI * (3.0 - kotlin.math.sqrt(5.0))).toFl
 fun WorkbenchScreen(
     transferRepository: TransferRepository,
     nfcManager: NfcManager,
+    cameraHandshakeManager: com.example.flash.handshake.CameraHandshakeManager? = null,
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -138,14 +142,23 @@ fun WorkbenchScreen(
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                WorkbenchViewModel(transferRepository, nfcManager) as T
+                WorkbenchViewModel(transferRepository, nfcManager, cameraHandshakeManager) as T
         }
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
-    // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
-    // This prevents Android's NFC app selector dialog from interfering with the handshake
+    LaunchedEffect(Unit) {
+        viewModel.initializeCameraHandshake()
+    }
+
+    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
+        if (uiState.selectedPhotos.isEmpty()) {
+            viewModel.startDiscoveringCameraPeers()
+        } else {
+            viewModel.stopDiscoveringCameraPeers()
+        }
+    }
+
     LaunchedEffect(Unit) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         val pendingIntent = PendingIntent.getActivity(
@@ -158,12 +171,9 @@ fun WorkbenchScreen(
             IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
             IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
         )
-        // Enable foreground dispatch in both send and receive modes
         nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
     }
 
-    // ── NFC Preferred Service (receiver mode only) ──────────────────────────
-    // When receiving, set Flash as the preferred HCE service to override system NFC routing
     LaunchedEffect(uiState.isReceiving) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         val adapter = NfcAdapter.getDefaultAdapter(context) ?: return@LaunchedEffect
@@ -186,7 +196,6 @@ fun WorkbenchScreen(
         }
     }
 
-    // ── Permission + auto-load camera roll ───────────────────────────────────
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -203,13 +212,11 @@ fun WorkbenchScreen(
         if (allGranted) viewModel.loadGalleryPhotos(context) else permissionLauncher.launch(needed)
     }
 
-    // ── Zero-click NFC download ──────────────────────────────────────────────
     LaunchedEffect(uiState.nfcState) {
         val s = uiState.nfcState
         if (s is NfcUiState.PeerDetected) viewModel.startDownload(s.handshake, context)
     }
 
-    // ── Camera cutout → blob-local offset ────────────────────────────────────
     val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
     val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
 
@@ -233,10 +240,9 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
-    // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
     LaunchedEffect(uiState.receivingPhotos) {
         if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
-            delay(3000L)  // Let them orbit for a bit
+            delay(3000L)
             shouldStartGalleryTransition = true
             viewModel.startGalleryTransitionForReceivingPhotos()
         }
@@ -254,12 +260,10 @@ fun WorkbenchScreen(
         }
     }
 
-    // Close settings panel on back press
     BackHandler(enabled = showSettings) { showSettings = false }
 
     val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
 
-    // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
     val bgAlpha by animateFloatAsState(
@@ -269,7 +273,6 @@ fun WorkbenchScreen(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // ── Sliding content (everything except MotherCore) ───────────────────
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -279,7 +282,6 @@ fun WorkbenchScreen(
                 )
                 .systemBarsPadding()
         ) {
-        // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(8.dp),
@@ -301,7 +303,6 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── Orbiting selected photos & received photos ─────────────────────────
         PhotoOrbit(
             photos           = uiState.selectedPhotos.toList(),
             coreCenter       = coreCenter,
@@ -311,17 +312,15 @@ fun WorkbenchScreen(
             corruptedIndices = uiState.corruptedIndicesInOrbit
         )
 
-        // ── Received photos materializing into orbit ─────────────────────────
         uiState.receivingPhotos.forEachIndexed { index, uri ->
             ReceivedPhotoMaterializeFlyer(
                 uri = uri,
                 coreCenter = coreCenter,
                 phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
-                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
+                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)
             )
         }
 
-        // ── Received photos flying from orbit into gallery ────────────────────
         if (uiState.receivingPhotos.isNotEmpty() && shouldStartGalleryTransition) {
             uiState.receivingPhotos.forEachIndexed { index, uri ->
                 ReceivedPhotoOrbitToGalleryFlyer(
@@ -332,7 +331,25 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── Bottom area: two buttons or settings panel ───────────────────────
+        LaunchedEffect(uiState.colorDetectionState) {
+            if (uiState.colorDetectionState == ColorDetectionState.Locked) {
+                delay(400)
+                viewModel.onColorConfirmed(context)
+            }
+        }
+
+        val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
+        val scanPopupColor = uiState.detectedPeerColor?.displayColor
+        if (scanPopupColor != null) {
+            ScanCompletePopup(
+                visible = showScanPopup,
+                lockedColor = scanPopupColor,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp)
+            )
+        }
+
         SharedTransitionLayout(
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
@@ -345,13 +362,11 @@ fun WorkbenchScreen(
                 label = "settings_transform"
             ) { isOpen ->
                 if (!isOpen) {
-                    // ── Two liquid buttons with spacer ───────────────────────
                     Row(
                         modifier = Modifier.padding(bottom = 24.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // Exit button
                         LiquidButton(
                             onClick      = { viewModel.onExitRequested() },
                             backdrop     = backdrop,
@@ -368,7 +383,6 @@ fun WorkbenchScreen(
 
                         Spacer(Modifier.width(12.dp))
 
-                        // Settings button — sharedBounds connects it to the panel
                         LiquidButton(
                             onClick      = { showSettings = true },
                             backdrop     = backdrop,
@@ -391,7 +405,6 @@ fun WorkbenchScreen(
                         }
                     }
                 } else {
-                    // ── Settings panel expands from the button ───────────────
                     SettingsPanel(
                         themeRepository = app.themeRepository,
                         backdrop        = backdrop,
@@ -409,7 +422,6 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── "+" liquid glass button — hidden when settings panel is open ─────
         AnimatedVisibility(
             visible = !showSettings,
             enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.85f),
@@ -431,7 +443,6 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── AGSL ripple on transfer complete ─────────────────────────────────
         if (uiState.showRipple) {
             RippleOverlay(
                 coreCenter = coreCenter,
@@ -439,7 +450,6 @@ fun WorkbenchScreen(
             )
         }
 
-        // ── Corruption alert modal ──────────────────────────────────────────
         CorruptionAlert(
             corruptedPhotos = uiState.corruptedPhotos,
             backdrop = backdrop,
@@ -448,7 +458,6 @@ fun WorkbenchScreen(
         )
         } // end sliding Box
 
-        // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -458,25 +467,56 @@ fun WorkbenchScreen(
                     val pos = coords.positionInParent()
                     val sz  = coords.size
                     coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
-                }
+                },
+            contentAlignment = Alignment.Center
         ) {
+            if (uiState.colorDetectionState == ColorDetectionState.Detecting ||
+                uiState.colorDetectionState == ColorDetectionState.Locked) {
+                val peerColor = uiState.detectedPeerColor
+                if (peerColor != null) {
+                    MotherCoreViewfinder(
+                        targetColor = peerColor.displayColor,
+                        onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
+                        onColorLocked = { viewModel.onColorLocked() }
+                    )
+                }
+            }
+
+            val lockedAccent = if (uiState.colorDetectionState == ColorDetectionState.Locked) {
+                uiState.detectedPeerColor?.displayColor?.let {
+                    androidx.compose.ui.graphics.Color(it)
+                }
+            } else null
+
             MotherCore(
                 progress     = uiState.transferProgress,
                 isReceiving  = uiState.isReceiving,
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
                 backdrop     = backdrop,
+                accentColor  = lockedAccent,
                 onAnimationComplete = {
                     val activity = context as? android.app.Activity
                     @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)
                     activity?.finish()
                 }
             )
+
+            if (uiState.colorDetectionState == ColorDetectionState.Detecting) {
+                androidx.compose.material3.Text(
+                    text = "Point at their MotherCore",
+                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(top = 180.dp)
+                )
+            }
         }
+
     }
 }
 
-// ── Liquid glass segmented button row ──────────────────────────────────────
 @Composable
 private fun <T> LiquidSegmentedButtonRow(
     items: List<T>,
@@ -531,7 +571,6 @@ private fun <T> LiquidSegmentedButtonRow(
     }
 }
 
-// ── Settings panel: liquid glass bottom container ───────────────────────────
 @Composable
 private fun SettingsPanel(
     themeRepository: ThemeRepository,
@@ -558,7 +597,6 @@ private fun SettingsPanel(
             )
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
-        // ── Liquid glass close button ────────────────────────────────────────
         LiquidButton(
             onClick      = onClose,
             backdrop     = backdrop,
@@ -577,7 +615,6 @@ private fun SettingsPanel(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            // ── Liquid glass "Settings" title pill ───────────────────────────
             Box(
                 modifier = Modifier
                     .drawBackdrop(
@@ -630,7 +667,6 @@ private fun SettingsPanel(
     }
 }
 
-// ── Received photo materializing into orbit ────────────────────────────────────
 @Composable
 private fun ReceivedPhotoMaterializeFlyer(
     uri: Uri,
@@ -645,9 +681,8 @@ private fun ReceivedPhotoMaterializeFlyer(
     }
 
     val progress = animProgress.value
-    if (progress >= 1f) return  // Animation complete, now in orbit via PhotoOrbit
+    if (progress >= 1f) return
 
-    // Phase 1 (0-0.15): Materialize with scale pulse at blob center
     val pulsePhase = (progress / 0.15f).coerceIn(0f, 1f)
     val pulseScale = if (pulsePhase < 0.5f) {
         lerp(0f, 1.2f, pulsePhase * 2f)
@@ -655,7 +690,6 @@ private fun ReceivedPhotoMaterializeFlyer(
         lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
     }
 
-    // Phase 2 (0.15-1): Fly outward to orbit position
     val flightPhase = ((progress - 0.15f) / 0.85f).coerceIn(0f, 1f)
 
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
@@ -690,7 +724,6 @@ private fun ReceivedPhotoMaterializeFlyer(
     )
 }
 
-// ── Received photo flying from orbit into gallery ─────────────────────────────
 @Composable
 private fun ReceivedPhotoOrbitToGalleryFlyer(
     uri: Uri,
@@ -705,7 +738,7 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     }
 
     val progress = animProgress.value
-    if (progress >= 1f) return  // Animation complete, now in gallery
+    if (progress >= 1f) return
 
     val gridItemSizeDp = 100.dp
     val paddingDp = 8.dp
@@ -720,12 +753,10 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
 
-    // Start from current orbit position (roughly at base radius)
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
     val orbitX = coreCenter.x + baseOrbitRadiusPx
     val orbitY = coreCenter.y
 
-    // Fly from orbit to gallery position
     val x = lerp(orbitX, targetX, progress)
     val y = lerp(orbitY, targetY, progress)
 
@@ -746,7 +777,6 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     )
 }
 
-// ── Received photo flying into gallery ──────────────────────────────────────────
 @Composable
 private fun ReceivedPhotoFlyer(
     uri: Uri,
@@ -761,8 +791,6 @@ private fun ReceivedPhotoFlyer(
     }
 
     val progress = animProgress.value
-
-    // Only render while animating; once complete, photo is in gallery at Z0
     if (progress >= 1f) return
 
     val gridItemSizeDp = 100.dp
@@ -778,7 +806,6 @@ private fun ReceivedPhotoFlyer(
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
 
-    // Phase 1 (0-0.2): Materialize with scale pulse + brief orbit glow
     val pulsePhase = (progress / 0.2f).coerceIn(0f, 1f)
     val pulseScale = if (pulsePhase < 0.5f) {
         lerp(0f, 1.2f, pulsePhase * 2f)
@@ -786,13 +813,11 @@ private fun ReceivedPhotoFlyer(
         lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
     }
 
-    // Phase 2 (0.2-0.4): Move horizontally to clear blob
     val horizontalPhase = ((progress - 0.2f) / 0.2f).coerceIn(0f, 1f)
     val horizontalDir = if (targetX < coreCenter.x) -1f else 1f
     val clearDistance = with(density) { 150.dp.toPx() }
     val clearX = coreCenter.x + (clearDistance * horizontalDir * horizontalPhase)
 
-    // Phase 3 (0.4-1): Fly to target grid position at Z1
     val flightPhase = ((progress - 0.4f) / 0.6f).coerceIn(0f, 1f)
     val x = lerp(clearX, targetX, flightPhase)
     val y = lerp(coreCenter.y, targetY, flightPhase)
@@ -819,7 +844,6 @@ private fun ReceivedPhotoFlyer(
     )
 }
 
-// ── Photo grid item ─────────────────────────────────────────────────────────────
 @Composable
 private fun PhotoGridItem(
     uri: Uri,
@@ -846,7 +870,6 @@ private fun PhotoGridItem(
     }
 }
 
-// ── Corruption Alert Modal ──────────────────────────────────────────────────
 @Composable
 private fun CorruptionAlert(
     corruptedPhotos: List<Uri>,
@@ -879,7 +902,8 @@ private fun CorruptionAlert(
                     )
                     .drawBackdrop(
                         backdrop = backdrop,
-                        effects = { blur(radius = 6.dp) + vibrancy(intensity = 0.3f) }
+                        shape = { RoundedCornerShape(20.dp) },
+                        effects = { vibrancy(); blur(6f.dp.toPx()) }
                     )
                     .padding(24.dp)
             ) {
@@ -905,7 +929,6 @@ private fun CorruptionAlert(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
 
-                    // Corrupted photos as circles in circular arrangement
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
