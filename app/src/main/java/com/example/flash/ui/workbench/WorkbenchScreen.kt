@@ -96,6 +96,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
 import com.example.flash.R
+import com.example.flash.handshake.ColorDetectionScreen
 import com.example.flash.nfc.NfcManager
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
@@ -146,6 +147,20 @@ fun WorkbenchScreen(
         }
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // ── Initialize camera handshake on first load ───────────────────────────
+    LaunchedEffect(Unit) {
+        viewModel.initializeCameraHandshake()
+    }
+
+    // ── Start discovery when in receiver mode ────────────────────────────────
+    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
+        if (uiState.selectedPhotos.isEmpty()) {
+            viewModel.startDiscoveringCameraPeers()
+        } else {
+            viewModel.stopDiscoveringCameraPeers()
+        }
+    }
 
     // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
     // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
@@ -493,6 +508,27 @@ fun WorkbenchScreen(
                     activity?.finish()
                 }
             )
+        }
+
+        // ── Camera color handshake (HyperOS fallback) ───────────────────────────
+        if (uiState.detectedPeerColor != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
+                ColorDetectionScreen(
+                    displayColor = uiState.displayColor ?: 0xFF0000,
+                    targetColor = uiState.detectedPeerColor?.displayColor ?: 0x0000FF,
+                    peerName = uiState.detectedPeerColor?.peerId ?: "Unknown",
+                    onColorDetected = {
+                        viewModel.onColorDetectionComplete(uiState.detectedPeerColor!!, context)
+                    },
+                    onCancel = {
+                        viewModel.dismissColorHandshake()
+                    }
+                )
+            }
         }
     }
 }

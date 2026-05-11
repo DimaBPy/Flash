@@ -353,4 +353,8 @@ class WorkbenchViewModel(
     fun stopDiscoveringCameraPeers() {
         cameraHandshakeManager?.stopDiscovery()
     }
+
+    fun dismissColorHandshake() {
+        _uiState.update { it.copy(detectedPeerColor = null) }
+    }
 }
