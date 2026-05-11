@@ -13,16 +13,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
 class FlashApplication : Application() {
-
-    // Process-wide scope that outlives any Activity/ViewModel rotation.
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     private val dataStore by preferencesDataStore(name = "flash_prefs")
-
     val themeRepository: ThemeRepository by lazy {
         ThemeRepository(dataStore)
     }
-
     val transferRepository: TransferRepository by lazy {
         TransferRepository(
             server = FileServer(applicationScope),
@@ -30,7 +25,6 @@ class FlashApplication : Application() {
             scope  = applicationScope
         )
     }
-
     val cameraHandshakeManager: CameraHandshakeManager? by lazy {
         if (DeviceDetector.isHyperOSDevice()) {
             CameraHandshakeManager(this)
@@ -38,12 +32,10 @@ class FlashApplication : Application() {
             null
         }
     }
-
     companion object {
         lateinit var instance: FlashApplication
             private set
     }
-
     override fun onCreate() {
         super.onCreate()
         instance = this

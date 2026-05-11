@@ -69,7 +69,6 @@ class FileClient {
         onProgress(1f)
         val result = files.filterNotNull()
 
-        // Async corruption check in background
         launchVerification(files, checksums, onFileVerified, onCorrupted)
 
         return result
@@ -83,7 +82,7 @@ class FileClient {
     ) {
         supervisorScope {
             launch {
-                delay(500)  // Let UI settle
+                delay(500)
                 corruptedFiles.clear()
                 corruptedIndices.clear()
                 verifiedFiles.clear()

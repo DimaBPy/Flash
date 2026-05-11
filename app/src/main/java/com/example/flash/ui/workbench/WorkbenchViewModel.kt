@@ -2,6 +2,8 @@ package com.example.flash.ui.workbench
 
 import android.content.ContentUris
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
@@ -13,13 +15,13 @@ import com.example.flash.nfc.PeerHandshake
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.transfer.TransferState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -91,7 +93,7 @@ class WorkbenchViewModel(
         transferRepository.fileVerifiedFlow
             .onEach { result ->
                 if (result != null) {
-                    val (index, isValid) = result
+                    val (index, _, isValid) = result
                     onPhotoVerified(index, isValid)
                 }
             }
@@ -120,6 +122,30 @@ class WorkbenchViewModel(
         }
     }
 
+    private fun isWifiConnected(context: Context): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    fun updateWifiStatus(context: Context) {
+        val connected = isWifiConnected(context)
+        _uiState.update { it.copy(isWifiConnected = connected) }
+        checkHotspotPromptVisibility()
+    }
+
+    private fun checkHotspotPromptVisibility() {
+        val state = _uiState.value
+        val shouldShow = state.selectedPhotos.isNotEmpty() && !state.isWifiConnected && !state.isReceiving
+        _uiState.update { it.copy(showHotspotPrompt = shouldShow) }
+    }
+
+    fun dismissHotspotPrompt() {
+        _uiState.update { it.copy(showHotspotPrompt = false) }
+    }
+
     fun loadGalleryPhotos(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val photos = mutableListOf<Uri>()
@@ -143,23 +169,26 @@ class WorkbenchViewModel(
         }
     }
 
-    fun onPhotosSelected(uris: List<Uri>) {
+    fun onPhotosSelected(uris: List<Uri>, context: Context) {
         _uiState.update {
             it.copy(
                 photos = (it.photos + uris).distinct(),
                 selectedPhotos = it.selectedPhotos + uris
             )
         }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(uris)
     }
 
-    fun onPhotoAddedToOrbit(uri: Uri) {
+    fun onPhotoAddedToOrbit(uri: Uri, context: Context) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(listOf(uri))
     }
 
     fun onPhotoRemovedFromOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos - uri) }
+        checkHotspotPromptVisibility()
         if (_uiState.value.selectedPhotos.isEmpty()) {
             nfcManager.clearOutboundHandshake()
             cameraHandshakeManager?.stopAdvertising()
@@ -211,6 +240,7 @@ class WorkbenchViewModel(
 
     fun onPhotoDraggedToCore(uri: Uri, context: Context) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos + uri) }
+        checkHotspotPromptVisibility()
         addToOrUpdateServer(listOf(uri))
     }
 

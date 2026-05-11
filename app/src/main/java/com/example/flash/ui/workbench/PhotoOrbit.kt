@@ -6,6 +6,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -26,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
@@ -36,17 +39,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
 import com.example.flash.ui.core.updateBlobPath
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
-import kotlin.math.abs
 
-// Golden angle — each new photo lands at a position that never bunches with others,
-// regardless of how many photos are added over time.
 private val GOLDEN_ANGLE = (PI * (3.0 - sqrt(5.0))).toFloat()
 
 @Composable
@@ -57,54 +56,60 @@ fun PhotoOrbit(
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
     shouldExit: Boolean = false,
-    corruptedIndices: Set<Int> = emptySet()
+    corruptedPhotos: List<Uri> = emptyList()
 ) {
     val density = LocalDensity.current
 
     val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "orbit")
 
+    val orbitDurationMs = (8000f * (1f - transferProgress * 0.4f)).toInt()
     val time by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(8000, easing = LinearEasing),
+            animation = tween(orbitDurationMs, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "orbit_time"
     )
 
-    val blobTime by infiniteTransition.animateFloat(
+    val blobDurationMs = (12_000f * (1f - transferProgress * 0.3f)).toInt()
+    val blobTimeFraction by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue  = 1000f,
-        animationSpec = infiniteRepeatable(tween(12_000, easing = LinearEasing)),
+        targetValue  = 1f,
+        animationSpec = infiniteRepeatable(tween(blobDurationMs, easing = LinearEasing)),
         label = "blob_time"
     )
+    val blobTime = blobTimeFraction * 1000f
 
     val radialDrift by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue  = with(density) { 8.dp.toPx() },
         animationSpec = infiniteRepeatable(
             animation = tween(4000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
+            repeatMode = RepeatMode.Reverse
         ),
         label = "radial_drift"
     )
 
-    val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
+    val transferIntensity by animateFloatAsState(
+        targetValue = transferProgress * 0.3f,
+        animationSpec = tween(200),
+        label = "transfer_intensity"
+    )
+    val baseOrbitRadiusPx = with(density) { (100.dp + (30.dp * transferIntensity)).toPx() }
     val photoSizeDp = 56.dp
     val photoSizePx = with(density) { photoSizeDp.toPx() }
 
     val visiblePhotos = remember { mutableStateListOf<Uri>() }
     val exitingPhotos = remember { mutableStateSetOf<Uri>() }
-    // Each URI gets a golden-angle phase assigned once on entry — never recalculated,
-    // so adding a new photo cannot shift existing photos' positions.
     val phaseMap = remember { mutableStateMapOf<Uri, Float>() }
     var nextPhaseIndex by remember { mutableIntStateOf(0) }
 
     val successPulse = remember { Animatable(0f) }
     LaunchedEffect(transferProgress, receivingPhotos) {
         if (transferProgress < 1f && successPulse.value != 0f) {
-            successPulse.snapTo(0f)  // Reset for next transfer
+            successPulse.snapTo(0f)
         } else if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
             successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
             successPulse.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 180f))
@@ -135,8 +140,7 @@ fun PhotoOrbit(
                 val phaseOffset = phaseMap[uri] ?: 0f
                 val isExiting = uri in exitingPhotos || shouldExit
                 val isReceiving = uri in receivingPhotos
-                val uriIndex = receivingPhotos.indexOf(uri)
-                val isCorrupted = uriIndex >= 0 && uriIndex in corruptedIndices
+                val isCorrupted = uri in corruptedPhotos
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -151,6 +155,7 @@ fun PhotoOrbit(
                     isReceiving = isReceiving,
                     isCorrupted = isCorrupted,
                     successProgress = if (isExiting || isReceiving) 0f else successPulse.value,
+                    transferProgress = transferProgress,
                     onExitComplete = {
                         visiblePhotos.remove(uri)
                         exitingPhotos.remove(uri)
@@ -177,17 +182,17 @@ private fun OrbitPhotoItem(
     isReceiving: Boolean = false,
     isCorrupted: Boolean = false,
     successProgress: Float = 0f,
+    transferProgress: Float = 0f,
     onExitComplete: () -> Unit
 ) {
     val entryProgress = remember { Animatable(0f) }
     val exitProgress  = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        // Skip entry animation for receiving photos — they're animated in separately
         if (!isReceiving) {
             entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
         } else {
-            entryProgress.snapTo(1f)  // Receiving photos start fully visible in orbit
+            entryProgress.snapTo(1f)
         }
     }
 
@@ -206,10 +211,9 @@ private fun OrbitPhotoItem(
     val xp = exitProgress.value
     val sp = successProgress
 
-    // Success animation: 0→0.5 = scale bloom up, 0.5→1 = scale down to zero + move to center
     val successScale = when {
-        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)  // Bloom up
-        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)  // Collapse to zero
+        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)
+        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)
     }
     val successX = if (sp > 0.5f) lerp(orbitX, coreCenter.x, (sp - 0.5f) * 2f) else orbitX
     val successY = if (sp > 0.5f) lerp(orbitY, coreCenter.y, (sp - 0.5f) * 2f) else orbitY
@@ -240,7 +244,6 @@ private fun OrbitPhotoItem(
             .drawWithCache {
                 val path = Path()
                 onDrawWithContent {
-                    // Bloom glow during success pulse
                     if (sp > 0f && sp < 1f) {
                         val bloomAlpha = (1f - abs(sp - 0.5f) * 2f) * 0.4f
                         drawCircle(
@@ -258,25 +261,28 @@ private fun OrbitPhotoItem(
                         )
                     }
 
+                    val enhancedNoiseAmp = 5.dp.toPx() * (1f + transferProgress * 0.8f)
                     updateBlobPath(
                         path     = path,
                         cx       = size.width  / 2f,
                         cy       = size.height / 2f,
                         baseR    = minOf(size.width, size.height) / 2f - 3.dp.toPx(),
-                        noiseAmp = 5.dp.toPx(),
+                        noiseAmp = enhancedNoiseAmp,
                         time     = photoBlobTime,
                         octaves  = 1
                     )
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
-                    }
 
-                    // Red tint for corrupted photos
-                    if (isCorrupted) {
-                        clipPath(path) {
+                        if (isCorrupted) {
                             drawRect(
-                                color = Color.Red.copy(alpha = 0.25f),
-                                size = this.size
+                                color = Color.Red.copy(alpha = 0.3f),
+                                size = size
+                            )
+                            drawCircle(
+                                color = Color.Red.copy(alpha = 0.6f),
+                                radius = size.width * 0.15f,
+                                center = Offset(size.width / 2f, size.height / 2f)
                             )
                         }
                     }

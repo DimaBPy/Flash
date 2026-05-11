@@ -9,6 +9,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,23 +24,13 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.compose.foundation.shape.CircleShape
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
-/**
- * Analyzes camera frames using real YUV chroma channels.
- *
- * Three safeguards prevent false positives:
- * 1. Saturation threshold — rejects dull environmental colors (walls, furniture)
- * 2. Fill ratio — requires >35% of center region to match (phone screen dominates viewfinder)
- * 3. Sustained match — 8 consecutive frames must pass before confirmation
- */
 class ColorMatcher(private val targetColor: Int) {
-
     private val targetHsv = FloatArray(3)
     private var firstMatchTimeMs = -1L
-    private val lockDurationMs = 1000L  // 1 second sustained match required
+    private val lockDurationMs = 1000L
 
     var lastMatchStrength = 0f
         private set
@@ -77,7 +68,6 @@ class ColorMatcher(private val targetColor: Int) {
 
                 Color.RGBToHSV(r, g, b, hsv)
 
-                // Safeguard 1: ignore low-saturation pixels (walls, shadows, furniture)
                 if (hsv[1] < 0.50f) continue
                 highSatPixels++
 
@@ -87,19 +77,16 @@ class ColorMatcher(private val targetColor: Int) {
         }
 
         if (highSatPixels < 20) {
-            // Not enough saturated pixels — likely looking at plain environment
             lastMatchStrength = 0f
             firstMatchTimeMs = -1L
             return false
         }
 
-        // Safeguard 2: fill ratio — phone screen must dominate the sampled region
         val fillRatio = matchingPixels.toFloat() / highSatPixels
         lastMatchStrength = fillRatio
 
         val isMatch = fillRatio > 0.35f
 
-        // Safeguard 3: must sustain match for 1 second continuously
         val now = System.currentTimeMillis()
         if (isMatch) {
             if (firstMatchTimeMs < 0) firstMatchTimeMs = now
@@ -111,11 +98,6 @@ class ColorMatcher(private val targetColor: Int) {
     }
 }
 
-/**
- * Live camera viewfinder clipped to a circle matching MotherCore's size.
- * Placed behind MotherCore so the blob shape frames the camera feed.
- * Color analysis runs in background — callbacks fire on main thread.
- */
 @Composable
 fun MotherCoreViewfinder(
     targetColor: Int,
@@ -143,7 +125,7 @@ fun MotherCoreViewfinder(
 
     Box(
         modifier = modifier
-            .size(160.dp)  // Matches MotherCore's BASE_RADIUS_DP * 2 + padding
+            .size(160.dp)
             .clip(CircleShape)
     ) {
         if (cameraProvider != null) {
