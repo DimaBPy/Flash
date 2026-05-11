@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
-import android.os.Build
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -30,20 +29,27 @@ class CameraHandshakeManager(private val context: Context) {
     private val _colorHandshakeFlow = MutableSharedFlow<ColorHandshake>(extraBufferCapacity = 1)
     val colorHandshakeFlow: SharedFlow<ColorHandshake> = _colorHandshakeFlow.asSharedFlow()
 
-    /**
-     * Generate a unique, distinguishable color for this device.
-     * Uses hue-based generation to ensure colors are well-spaced across the color wheel.
-     */
-    fun generateDisplayColor(): Int {
-        val hue = (peerId.hashCode() and 0xFF).toFloat()
-        val saturation = 0.9f  // High saturation for distinctness
-        val value = 0.95f       // High brightness for camera visibility
-        return Color.HSVToColor(floatArrayOf(hue, saturation, value))
+    companion object {
+        // Priority order: calm colors first, red last (avoids "error" association)
+        private val COLOR_PALETTE_HUES = floatArrayOf(
+            200f,  // Light blue
+            140f,  // Light green
+            280f,  // Purple
+            30f,   // Orange
+            170f,  // Teal
+            60f,   // Yellow
+            320f,  // Pink
+            0f     // Red (last resort)
+        )
     }
 
-    /**
-     * Start advertising this device on the local network via mDNS.
-     */
+    fun generateDisplayColor(): Int {
+        val index = ((peerId.hashCode() and 0x7FFFFFFF) % COLOR_PALETTE_HUES.size)
+        val hue = COLOR_PALETTE_HUES[index]
+        // High saturation + brightness for camera detectability; light variants
+        return Color.HSVToColor(floatArrayOf(hue, 0.65f, 0.95f))
+    }
+
     fun startAdvertising(displayColor: Int, port: Int, token: String, fileCount: Int) {
         if (nsdManager == null) return
 
@@ -66,9 +72,6 @@ class CameraHandshakeManager(private val context: Context) {
         nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
     }
 
-    /**
-     * Start discovering other Flash devices on the local network.
-     */
     fun startDiscovery() {
         if (nsdManager == null) return
 
@@ -80,9 +83,7 @@ class CameraHandshakeManager(private val context: Context) {
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
                 serviceInfo?.let {
-                    if (it.serviceName != "flash-$peerId") {
-                        resolveService(it)
-                    }
+                    if (it.serviceName != "flash-$peerId") resolveService(it)
                 }
             }
 
@@ -101,21 +102,10 @@ class CameraHandshakeManager(private val context: Context) {
                 serviceInfo?.let { resolved ->
                     val hostAddress = resolved.host?.hostAddress ?: return@let
                     val port = resolved.port
-                    val colorStr = resolved.attributes["color"]?.let {
-                        String(it, Charsets.UTF_8)
-                    } ?: return@let
-                    val color = try {
-                        Integer.parseUnsignedInt(colorStr, 16)
-                    } catch (_: Exception) {
-                        Color.BLUE.toLong().toInt()
-                    }
-                    val token = resolved.attributes["token"]?.let {
-                        String(it, Charsets.UTF_8)
-                    } ?: return@let
-                    val fileCountStr = resolved.attributes["fileCount"]?.let {
-                        String(it, Charsets.UTF_8)
-                    } ?: "1"
-                    val fileCount = fileCountStr.toIntOrNull() ?: 1
+                    val colorStr = resolved.attributes["color"]?.let { String(it, Charsets.UTF_8) } ?: return@let
+                    val color = try { Integer.parseUnsignedInt(colorStr, 16) } catch (_: Exception) { Color.BLUE }
+                    val token = resolved.attributes["token"]?.let { String(it, Charsets.UTF_8) } ?: return@let
+                    val fileCount = resolved.attributes["fileCount"]?.let { String(it, Charsets.UTF_8) }?.toIntOrNull() ?: 1
 
                     _colorHandshakeFlow.tryEmit(ColorHandshake(
                         peerId = resolved.serviceName,

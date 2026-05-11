@@ -61,6 +61,7 @@ fun MotherCore(
     shouldExit: Boolean = false,
     cutoutOffset: Offset = Offset.Zero,
     backdrop: Backdrop? = null,
+    accentColor: Color? = null,
     onAnimationComplete: () -> Unit = {}
 ) {
     val isDark = isSystemInDarkTheme()
@@ -212,6 +213,11 @@ fun MotherCore(
             }
 
             clipPath(blobPath) {
+                // ── Accent color overlay (color detection lock-on) ─────────────
+                if (accentColor != null) {
+                    drawRect(accentColor.copy(alpha = 0.72f))
+                }
+
                 // ── Rim light: bright aqua glow on the bottom-right edge ──────
                 drawCircle(
                     brush = Brush.radialGradient(

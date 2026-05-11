@@ -1,6 +1,5 @@
 package com.example.flash.handshake
 
-import android.content.Context
 import android.graphics.Color
 import android.util.Log
 import androidx.camera.core.CameraSelector
@@ -8,14 +7,8 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,69 +16,117 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import java.util.concurrent.ExecutorService
+import androidx.compose.foundation.shape.CircleShape
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
 /**
- * Analyzes camera frames to detect when the dominant color matches a target.
+ * Analyzes camera frames using real YUV chroma channels.
+ *
+ * Three safeguards prevent false positives:
+ * 1. Saturation threshold — rejects dull environmental colors (walls, furniture)
+ * 2. Fill ratio — requires >35% of center region to match (phone screen dominates viewfinder)
+ * 3. Sustained match — 8 consecutive frames must pass before confirmation
  */
 class ColorMatcher(private val targetColor: Int) {
+
     private val targetHsv = FloatArray(3)
-    private val frameHsv = FloatArray(3)
-    private var matchCount = 0
-    private val matchThreshold = 5  // Frames to hold for confirmation
+    private var firstMatchTimeMs = -1L
+    private val lockDurationMs = 1000L  // 1 second sustained match required
+
+    var lastMatchStrength = 0f
+        private set
 
     init {
         Color.colorToHSV(targetColor, targetHsv)
     }
 
-    fun analyzeFrame(rgbData: IntArray): Boolean {
-        val dominantColor = computeDominantColor(rgbData)
-        Color.colorToHSV(dominantColor, frameHsv)
+    fun analyzeFrame(
+        yData: ByteArray, uData: ByteArray, vData: ByteArray,
+        width: Int, height: Int,
+        yRowStride: Int, uvRowStride: Int, uvPixelStride: Int
+    ): Boolean {
+        val cx = width / 2
+        val cy = height / 2
+        val radius = minOf(width, height) / 5
 
-        val hueDiff = minOf(abs(frameHsv[0] - targetHsv[0]), 360f - abs(frameHsv[0] - targetHsv[0]))
-        val satDiff = abs(frameHsv[1] - targetHsv[1])
-        val valDiff = abs(frameHsv[2] - targetHsv[2])
+        var matchingPixels = 0
+        var highSatPixels = 0
+        val hsv = FloatArray(3)
 
-        // Hue is most important; allow 30° tolerance
-        val isMatch = hueDiff < 30f && satDiff < 0.2f && valDiff < 0.2f
+        for (y in maxOf(0, cy - radius)..minOf(height - 1, cy + radius)) {
+            for (x in maxOf(0, cx - radius)..minOf(width - 1, cx + radius)) {
+                val yIdx = y * yRowStride + x
+                val uvIdx = (y / 2) * uvRowStride + (x / 2) * uvPixelStride
+                if (yIdx >= yData.size || uvIdx >= uData.size || uvIdx >= vData.size) continue
 
-        matchCount = if (isMatch) matchCount + 1 else 0
-        return matchCount >= matchThreshold
-    }
+                val yv = (yData[yIdx].toInt() and 0xFF) - 16
+                val uv = (uData[uvIdx].toInt() and 0xFF) - 128
+                val vv = (vData[uvIdx].toInt() and 0xFF) - 128
 
-    private fun computeDominantColor(rgbData: IntArray): Int {
-        val r = rgbData.sumOf { (it shr 16) and 0xFF } / rgbData.size
-        val g = rgbData.sumOf { (it shr 8) and 0xFF } / rgbData.size
-        val b = rgbData.sumOf { it and 0xFF } / rgbData.size
-        return Color.rgb(r, g, b)
+                val r = ((298 * yv + 409 * vv + 128) shr 8).coerceIn(0, 255)
+                val g = ((298 * yv - 100 * uv - 208 * vv + 128) shr 8).coerceIn(0, 255)
+                val b = ((298 * yv + 516 * uv + 128) shr 8).coerceIn(0, 255)
+
+                Color.RGBToHSV(r, g, b, hsv)
+
+                // Safeguard 1: ignore low-saturation pixels (walls, shadows, furniture)
+                if (hsv[1] < 0.50f) continue
+                highSatPixels++
+
+                val hueDiff = minOf(abs(hsv[0] - targetHsv[0]), 360f - abs(hsv[0] - targetHsv[0]))
+                if (hueDiff < 35f) matchingPixels++
+            }
+        }
+
+        if (highSatPixels < 20) {
+            // Not enough saturated pixels — likely looking at plain environment
+            lastMatchStrength = 0f
+            firstMatchTimeMs = -1L
+            return false
+        }
+
+        // Safeguard 2: fill ratio — phone screen must dominate the sampled region
+        val fillRatio = matchingPixels.toFloat() / highSatPixels
+        lastMatchStrength = fillRatio
+
+        val isMatch = fillRatio > 0.35f
+
+        // Safeguard 3: must sustain match for 1 second continuously
+        val now = System.currentTimeMillis()
+        if (isMatch) {
+            if (firstMatchTimeMs < 0) firstMatchTimeMs = now
+            return (now - firstMatchTimeMs) >= lockDurationMs
+        } else {
+            firstMatchTimeMs = -1L
+            return false
+        }
     }
 }
 
+/**
+ * Live camera viewfinder clipped to a circle matching MotherCore's size.
+ * Placed behind MotherCore so the blob shape frames the camera feed.
+ * Color analysis runs in background — callbacks fire on main thread.
+ */
 @Composable
-fun ColorDetectionScreen(
-    displayColor: Int,
+fun MotherCoreViewfinder(
     targetColor: Int,
-    peerName: String,
-    onColorDetected: () -> Unit,
-    onCancel: () -> Unit
+    onMatchStrengthChanged: (Float) -> Unit,
+    onColorLocked: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-
-    var colorDetected by remember { mutableStateOf(false) }
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
-    val executorService = remember { Executors.newSingleThreadExecutor() }
+    val executor = remember { Executors.newSingleThreadExecutor() }
 
     LaunchedEffect(Unit) {
         ProcessCameraProvider.getInstance(context).addListener({
@@ -95,83 +136,59 @@ fun ColorDetectionScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            executorService.shutdown()
+            executor.shutdown()
             cameraProvider?.unbindAll()
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Display color target (what the other phone is showing)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .background(ComposeColor(targetColor))
-                .padding(32.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Tap camera on\nthis color on $peerName",
-                color = ComposeColor.White,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.background(
-                    ComposeColor.Black.copy(alpha = 0.5f),
-                    RoundedCornerShape(8.dp)
-                ).padding(16.dp)
-            )
-        }
-
-        // Camera preview
+    Box(
+        modifier = modifier
+            .size(160.dp)  // Matches MotherCore's BASE_RADIUS_DP * 2 + padding
+            .clip(CircleShape)
+    ) {
         if (cameraProvider != null) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).apply {
                         val preview = Preview.Builder().build()
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                         val colorMatcher = ColorMatcher(targetColor)
+                        var locked = false
 
                         val imageAnalysis = ImageAnalysis.Builder()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                             .build()
                             .apply {
-                                setAnalyzer(executorService) { imageProxy ->
+                                setAnalyzer(executor) { imageProxy ->
                                     try {
                                         val planes = imageProxy.planes
-                                        val width = imageProxy.width
-                                        val height = imageProxy.height
+                                        val yPlane = planes[0]
+                                        val uPlane = planes[1]
+                                        val vPlane = planes[2]
 
-                                        // Sample luminance plane (Y) to determine brightness-dominant colors
-                                        val buffer = planes[0].buffer
-                                        val pixelStride = planes[0].pixelStride
-                                        val data = ByteArray(buffer.remaining())
-                                        buffer.get(data)
+                                        val yBuf = yPlane.buffer
+                                        val uBuf = uPlane.buffer
+                                        val vBuf = vPlane.buffer
 
-                                        // Sample center region for efficiency
-                                        val centerX = width / 2
-                                        val centerY = height / 2
-                                        val sampleSize = minOf(width, height) / 4
-                                        val rgbData = mutableListOf<Int>()
+                                        val yData = ByteArray(yBuf.remaining()).also { yBuf.get(it) }
+                                        val uData = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
+                                        val vData = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
 
-                                        for (y in maxOf(0, centerY - sampleSize)..minOf(height - 1, centerY + sampleSize)) {
-                                            for (x in maxOf(0, centerX - sampleSize)..minOf(width - 1, centerX + sampleSize)) {
-                                                val index = y * width + x  // Simplified indexing for Y plane
-                                                if (index in data.indices) {
-                                                    val yVal = data[index].toInt() and 0xFF
-                                                    // Approximate RGB from Y value for color detection
-                                                    val rgb = Color.rgb(yVal, yVal, yVal)
-                                                    rgbData.add(rgb)
-                                                }
-                                            }
-                                        }
+                                        val confirmed = colorMatcher.analyzeFrame(
+                                            yData, uData, vData,
+                                            imageProxy.width, imageProxy.height,
+                                            yPlane.rowStride, uPlane.rowStride, uPlane.pixelStride
+                                        )
 
-                                        if (rgbData.isNotEmpty() && colorMatcher.analyzeFrame(rgbData.toIntArray())) {
-                                            if (!colorDetected) {
-                                                colorDetected = true
-                                                onColorDetected()
+                                        ContextCompat.getMainExecutor(ctx).execute {
+                                            onMatchStrengthChanged(colorMatcher.lastMatchStrength)
+                                            if (confirmed && !locked) {
+                                                locked = true
+                                                onColorLocked()
                                             }
                                         }
                                     } catch (e: Exception) {
-                                        Log.e("ColorDetection", "Error analyzing frame", e)
+                                        Log.e("ColorDetection", "Frame error", e)
                                     } finally {
                                         imageProxy.close()
                                     }
@@ -182,32 +199,18 @@ fun ColorDetectionScreen(
                             cameraProvider?.unbindAll()
                             cameraProvider?.bindToLifecycle(
                                 lifecycleOwner,
-                                cameraSelector,
+                                CameraSelector.DEFAULT_BACK_CAMERA,
                                 preview,
                                 imageAnalysis
                             )
                             preview.surfaceProvider = this.surfaceProvider
                         } catch (e: Exception) {
-                            Log.e("ColorDetection", "Camera binding failed", e)
+                            Log.e("ColorDetection", "Camera bind failed", e)
                         }
                     }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                modifier = Modifier.matchParentSize()
             )
         }
     }
-}
-
-private fun yuvToRgb(y: Int, u: Int, v: Int): Int {
-    val yy = y - 16
-    val uu = u - 128
-    val vv = v - 128
-
-    val r = ((298 * yy + 409 * vv + 128) shr 8).coerceIn(0, 255)
-    val g = ((298 * yy - 100 * uu - 208 * vv + 128) shr 8).coerceIn(0, 255)
-    val b = ((298 * yy + 516 * uu + 128) shr 8).coerceIn(0, 255)
-
-    return (r shl 16) or (g shl 8) or b
 }

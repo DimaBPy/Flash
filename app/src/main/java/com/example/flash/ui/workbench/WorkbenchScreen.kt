@@ -96,8 +96,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
 import com.example.flash.R
-import com.example.flash.handshake.ColorDetectionScreen
+import com.example.flash.handshake.MotherCoreViewfinder
+import com.example.flash.handshake.ScanCompletePopup
 import com.example.flash.nfc.NfcManager
+import com.example.flash.ui.workbench.ColorDetectionState
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.shader.RippleOverlay
@@ -351,6 +353,27 @@ fun WorkbenchScreen(
             }
         }
 
+        // ── Auto-confirm when color locks (no user tap needed) ───────────────
+        LaunchedEffect(uiState.colorDetectionState) {
+            if (uiState.colorDetectionState == ColorDetectionState.Locked) {
+                delay(400)  // brief moment to show solid color before starting transfer
+                viewModel.onColorConfirmed(context)
+            }
+        }
+
+        // ── Scan complete popup (springs up above buttons) ────────────────────
+        val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
+        val scanPopupColor = uiState.detectedPeerColor?.displayColor
+        if (scanPopupColor != null) {
+            ScanCompletePopup(
+                visible = showScanPopup,
+                lockedColor = scanPopupColor,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp)
+            )
+        }
+
         // ── Bottom area: two buttons or settings panel ───────────────────────
         SharedTransitionLayout(
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -494,42 +517,55 @@ fun WorkbenchScreen(
                     val pos = coords.positionInParent()
                     val sz  = coords.size
                     coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
-                }
+                },
+            contentAlignment = Alignment.Center
         ) {
+            // ── Camera viewfinder rendered behind MotherCore when detecting ────
+            if (uiState.colorDetectionState == ColorDetectionState.Detecting ||
+                uiState.colorDetectionState == ColorDetectionState.Locked) {
+                val peerColor = uiState.detectedPeerColor
+                if (peerColor != null) {
+                    MotherCoreViewfinder(
+                        targetColor = peerColor.displayColor,
+                        onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
+                        onColorLocked = { viewModel.onColorLocked() }
+                    )
+                }
+            }
+
+            val lockedAccent = if (uiState.colorDetectionState == ColorDetectionState.Locked) {
+                uiState.detectedPeerColor?.displayColor?.let {
+                    androidx.compose.ui.graphics.Color(it)
+                }
+            } else null
+
             MotherCore(
                 progress     = uiState.transferProgress,
                 isReceiving  = uiState.isReceiving,
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
                 backdrop     = backdrop,
+                accentColor  = lockedAccent,
                 onAnimationComplete = {
                     val activity = context as? android.app.Activity
                     @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)
                     activity?.finish()
                 }
             )
-        }
 
-        // ── Camera color handshake (HyperOS fallback) ───────────────────────────
-        if (uiState.detectedPeerColor != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background)
-            ) {
-                ColorDetectionScreen(
-                    displayColor = uiState.displayColor ?: 0xFF0000,
-                    targetColor = uiState.detectedPeerColor?.displayColor ?: 0x0000FF,
-                    peerName = uiState.detectedPeerColor?.peerId ?: "Unknown",
-                    onColorDetected = {
-                        viewModel.onColorDetectionComplete(uiState.detectedPeerColor!!, context)
-                    },
-                    onCancel = {
-                        viewModel.dismissColorHandshake()
-                    }
+            // ── Detecting hint label ─────────────────────────────────────────
+            if (uiState.colorDetectionState == ColorDetectionState.Detecting) {
+                androidx.compose.material3.Text(
+                    text = "Point at their MotherCore",
+                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(top = 180.dp)
                 )
             }
         }
+
     }
 }
 

@@ -34,6 +34,8 @@ sealed interface NfcUiState {
     data class Error(val message: String) : NfcUiState
 }
 
+enum class ColorDetectionState { Idle, Detecting, Locked }
+
 data class WorkbenchUiState(
     val photos: List<Uri>        = emptyList(),
     val selectedPhotos: Set<Uri> = emptySet(),
@@ -50,7 +52,9 @@ data class WorkbenchUiState(
     val isWifiConnected: Boolean = false,
     val showHotspotPrompt: Boolean = false,
     val displayColor: Int? = null,
-    val detectedPeerColor: ColorHandshake? = null
+    val detectedPeerColor: ColorHandshake? = null,
+    val colorDetectionState: ColorDetectionState = ColorDetectionState.Idle,
+    val detectionStrength: Float = 0f
 )
 
 class WorkbenchViewModel(
@@ -250,21 +254,42 @@ class WorkbenchViewModel(
 
     private fun onColorPeerDetected(handshake: ColorHandshake) {
         if (_uiState.value.selectedPhotos.isEmpty()) {
-            _uiState.update { it.copy(detectedPeerColor = handshake) }
+            _uiState.update {
+                it.copy(
+                    detectedPeerColor = handshake,
+                    colorDetectionState = ColorDetectionState.Detecting
+                )
+            }
         }
     }
 
-    fun onColorDetectionComplete(colorHandshake: ColorHandshake, context: Context) {
+    fun onDetectionStrengthChanged(strength: Float) {
+        _uiState.update { it.copy(detectionStrength = strength) }
+    }
+
+    fun onColorLocked() {
+        _uiState.update { it.copy(colorDetectionState = ColorDetectionState.Locked) }
+    }
+
+    fun onColorConfirmed(context: Context) {
+        val handshake = _uiState.value.detectedPeerColor ?: return
         startDownload(
             PeerHandshake(
-                ip = colorHandshake.ip,
-                port = colorHandshake.port,
-                token = colorHandshake.token,
+                ip = handshake.ip,
+                port = handshake.port,
+                token = handshake.token,
                 lang = "en",
-                fileCount = colorHandshake.fileCount
+                fileCount = handshake.fileCount
             ),
             context
         )
+        _uiState.update {
+            it.copy(
+                colorDetectionState = ColorDetectionState.Idle,
+                detectedPeerColor = null,
+                detectionStrength = 0f
+            )
+        }
     }
 
     fun startDownload(handshake: PeerHandshake, context: Context) {
@@ -355,6 +380,12 @@ class WorkbenchViewModel(
     }
 
     fun dismissColorHandshake() {
-        _uiState.update { it.copy(detectedPeerColor = null) }
+        _uiState.update {
+            it.copy(
+                detectedPeerColor = null,
+                colorDetectionState = ColorDetectionState.Idle,
+                detectionStrength = 0f
+            )
+        }
     }
 }
