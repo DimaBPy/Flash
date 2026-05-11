@@ -130,6 +130,7 @@ private val GOLDEN_ANGLE = (kotlin.math.PI * (3.0 - kotlin.math.sqrt(5.0))).toFl
 fun WorkbenchScreen(
     transferRepository: TransferRepository,
     nfcManager: NfcManager,
+    cameraHandshakeManager: com.example.flash.handshake.CameraHandshakeManager? = null,
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -141,7 +142,7 @@ fun WorkbenchScreen(
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                WorkbenchViewModel(transferRepository, nfcManager) as T
+                WorkbenchViewModel(transferRepository, nfcManager, cameraHandshakeManager) as T
         }
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

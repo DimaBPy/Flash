@@ -8,6 +8,8 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.flash.handshake.CameraHandshakeManager
+import com.example.flash.handshake.ColorHandshake
 import com.example.flash.nfc.NfcManager
 import com.example.flash.nfc.PeerHandshake
 import com.example.flash.transfer.TransferRepository
@@ -46,12 +48,15 @@ data class WorkbenchUiState(
     val corruptedPhotos: List<Uri> = emptyList(),
     val corruptedIndicesInOrbit: Set<Int> = emptySet(),
     val isWifiConnected: Boolean = false,
-    val showHotspotPrompt: Boolean = false
+    val showHotspotPrompt: Boolean = false,
+    val displayColor: Int? = null,
+    val detectedPeerColor: ColorHandshake? = null
 )
 
 class WorkbenchViewModel(
     private val transferRepository: TransferRepository,
-    private val nfcManager: NfcManager
+    private val nfcManager: NfcManager,
+    cameraHandshakeManager: CameraHandshakeManager? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorkbenchUiState())
@@ -60,11 +65,16 @@ class WorkbenchViewModel(
     private var currentToken: String = ""
     private var currentIp: String = ""
     private var currentPort: Int = 0
+    private val cameraHandshakeManager = cameraHandshakeManager
 
     init {
         nfcManager.peerHandshakeFlow
             .onEach { handshake -> onNfcPeerDetected(handshake) }
             .launchIn(viewModelScope)
+
+        cameraHandshakeManager?.colorHandshakeFlow
+            ?.onEach { handshake -> onColorPeerDetected(handshake) }
+            ?.launchIn(viewModelScope)
 
         transferRepository.transferState
             .onEach { state -> onTransferStateChanged(state) }
@@ -174,8 +184,10 @@ class WorkbenchViewModel(
 
     fun onPhotoRemovedFromOrbit(uri: Uri) {
         _uiState.update { it.copy(selectedPhotos = it.selectedPhotos - uri) }
+        checkHotspotPromptVisibility()
         if (_uiState.value.selectedPhotos.isEmpty()) {
             nfcManager.clearOutboundHandshake()
+            cameraHandshakeManager?.stopAdvertising()
             currentPort = 0
         }
     }
@@ -193,6 +205,12 @@ class WorkbenchViewModel(
                         localIp, currentPort, currentToken, "en",
                         transferRepository.servingFileCount
                     )
+                    cameraHandshakeManager?.startAdvertising(
+                        displayColor = _uiState.value.displayColor ?: 0xFF0000,
+                        port = currentPort,
+                        token = currentToken,
+                        fileCount = transferRepository.servingFileCount
+                    )
                 } else {
                     // No server yet — start fresh
                     currentToken = UUID.randomUUID().toString()
@@ -201,6 +219,12 @@ class WorkbenchViewModel(
                     nfcManager.setOutboundHandshake(
                         localIp, currentPort, currentToken, "en",
                         transferRepository.servingFileCount
+                    )
+                    cameraHandshakeManager?.startAdvertising(
+                        displayColor = _uiState.value.displayColor ?: 0xFF0000,
+                        port = currentPort,
+                        token = currentToken,
+                        fileCount = transferRepository.servingFileCount
                     )
                     _uiState.update { it.copy(nfcState = NfcUiState.Advertising) }
                 }
@@ -222,6 +246,25 @@ class WorkbenchViewModel(
         if (_uiState.value.selectedPhotos.isEmpty()) {
             _uiState.update { it.copy(nfcState = NfcUiState.PeerDetected(handshake), isReceiving = true) }
         }
+    }
+
+    private fun onColorPeerDetected(handshake: ColorHandshake) {
+        if (_uiState.value.selectedPhotos.isEmpty()) {
+            _uiState.update { it.copy(detectedPeerColor = handshake) }
+        }
+    }
+
+    fun onColorDetectionComplete(colorHandshake: ColorHandshake, context: Context) {
+        startDownload(
+            PeerHandshake(
+                ip = colorHandshake.ip,
+                port = colorHandshake.port,
+                token = colorHandshake.token,
+                lang = "en",
+                fileCount = colorHandshake.fileCount
+            ),
+            context
+        )
     }
 
     fun startDownload(handshake: PeerHandshake, context: Context) {
@@ -296,5 +339,18 @@ class WorkbenchViewModel(
             dismissCorruptionAlert()
             _uiState.update { it.copy(nfcState = NfcUiState.Idle) }
         }
+    }
+
+    fun initializeCameraHandshake() {
+        val displayColor = cameraHandshakeManager?.generateDisplayColor() ?: 0xFF0000
+        _uiState.update { it.copy(displayColor = displayColor) }
+    }
+
+    fun startDiscoveringCameraPeers() {
+        cameraHandshakeManager?.startDiscovery()
+    }
+
+    fun stopDiscoveringCameraPeers() {
+        cameraHandshakeManager?.stopDiscovery()
     }
 }
