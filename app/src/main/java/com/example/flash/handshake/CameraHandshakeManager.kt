@@ -74,6 +74,7 @@ class CameraHandshakeManager(private val context: Context) {
 
         discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String?) {}
+            override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {}
             override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) {}
             override fun onDiscoveryStopped(serviceType: String?) {}
 
@@ -100,11 +101,21 @@ class CameraHandshakeManager(private val context: Context) {
                 serviceInfo?.let { resolved ->
                     val hostAddress = resolved.host?.hostAddress ?: return@let
                     val port = resolved.port
-                    val color = resolved.attributes["color"]?.let {
-                        Integer.parseUnsignedInt(it, 16)
-                    } ?: Color.BLUE
-                    val token = resolved.attributes["token"] ?: return@let
-                    val fileCount = resolved.attributes["fileCount"]?.toIntOrNull() ?: 1
+                    val colorStr = resolved.attributes["color"]?.let {
+                        String(it, Charsets.UTF_8)
+                    } ?: return@let
+                    val color = try {
+                        Integer.parseUnsignedInt(colorStr, 16)
+                    } catch (_: Exception) {
+                        Color.BLUE.toLong().toInt()
+                    }
+                    val token = resolved.attributes["token"]?.let {
+                        String(it, Charsets.UTF_8)
+                    } ?: return@let
+                    val fileCountStr = resolved.attributes["fileCount"]?.let {
+                        String(it, Charsets.UTF_8)
+                    } ?: "1"
+                    val fileCount = fileCountStr.toIntOrNull() ?: 1
 
                     _colorHandshakeFlow.tryEmit(ColorHandshake(
                         peerId = resolved.serviceName,

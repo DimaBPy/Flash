@@ -1,6 +1,5 @@
 package com.example.flash.handshake
 
-import android.Manifest
 import android.content.Context
 import android.graphics.Color
 import android.util.Log
@@ -33,8 +32,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.rememberPermissionState
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -75,7 +72,6 @@ class ColorMatcher(private val targetColor: Int) {
     }
 }
 
-@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun ColorDetectionScreen(
     displayColor: Int,
@@ -86,21 +82,12 @@ fun ColorDetectionScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
 
     var colorDetected by remember { mutableStateOf(false) }
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     val executorService = remember { Executors.newSingleThreadExecutor() }
 
     LaunchedEffect(Unit) {
-        if (!cameraPermission.hasPermission) {
-            cameraPermission.launchPermissionRequest()
-        }
-    }
-
-    LaunchedEffect(cameraPermission.hasPermission) {
-        if (!cameraPermission.hasPermission) return@LaunchedEffect
-
         ProcessCameraProvider.getInstance(context).addListener({
             cameraProvider = ProcessCameraProvider.getInstance(context).get()
         }, ContextCompat.getMainExecutor(context))
@@ -135,7 +122,7 @@ fun ColorDetectionScreen(
         }
 
         // Camera preview
-        if (cameraPermission.hasPermission && cameraProvider != null) {
+        if (cameraProvider != null) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).apply {
@@ -150,12 +137,12 @@ fun ColorDetectionScreen(
                                 setAnalyzer(executorService) { imageProxy ->
                                     try {
                                         val planes = imageProxy.planes
-                                        val buffer = planes[0].buffer
-                                        val pixelStride = planes[0].pixelStride
                                         val width = imageProxy.width
                                         val height = imageProxy.height
-                                        val rowPadding = planes[0].rowPadding
 
+                                        // Sample luminance plane (Y) to determine brightness-dominant colors
+                                        val buffer = planes[0].buffer
+                                        val pixelStride = planes[0].pixelStride
                                         val data = ByteArray(buffer.remaining())
                                         buffer.get(data)
 
@@ -165,20 +152,19 @@ fun ColorDetectionScreen(
                                         val sampleSize = minOf(width, height) / 4
                                         val rgbData = mutableListOf<Int>()
 
-                                        for (y in (centerY - sampleSize)..(centerY + sampleSize)) {
-                                            for (x in (centerX - sampleSize)..(centerX + sampleSize)) {
-                                                val index = y * rowPadding + x * pixelStride
+                                        for (y in maxOf(0, centerY - sampleSize)..minOf(height - 1, centerY + sampleSize)) {
+                                            for (x in maxOf(0, centerX - sampleSize)..minOf(width - 1, centerX + sampleSize)) {
+                                                val index = y * width + x  // Simplified indexing for Y plane
                                                 if (index in data.indices) {
-                                                    val y_val = data[index].toInt() and 0xFF
-                                                    val u = data[index + 1].toInt() and 0xFF
-                                                    val v = data[index + 2].toInt() and 0xFF
-                                                    val rgb = yuvToRgb(y_val, u, v)
+                                                    val yVal = data[index].toInt() and 0xFF
+                                                    // Approximate RGB from Y value for color detection
+                                                    val rgb = Color.rgb(yVal, yVal, yVal)
                                                     rgbData.add(rgb)
                                                 }
                                             }
                                         }
 
-                                        if (colorMatcher.analyzeFrame(rgbData.toIntArray())) {
+                                        if (rgbData.isNotEmpty() && colorMatcher.analyzeFrame(rgbData.toIntArray())) {
                                             if (!colorDetected) {
                                                 colorDetected = true
                                                 onColorDetected()
