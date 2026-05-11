@@ -39,9 +39,11 @@ fun NavGraph(
         }
 
         composable(Screen.Main.route) {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.example.flash.FlashApplication
             WorkbenchScreen(
                 transferRepository = transferRepository,
                 nfcManager = nfcManager,
+                cameraHandshakeManager = app.cameraHandshakeManager,
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
             )
         }
