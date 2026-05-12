@@ -243,18 +243,42 @@ Two phones animating in TwoPhonesAnimation:
 - `RippleShader.kt` — AGSL shader for ripple effect on file transfer
 - `gradle/libs.versions.toml` — Dependency versions (AGP, Kotlin, Compose, Ktor, etc.)
 
-## Versioning
+## Version Management Workflow
 
-### Version Code
-- Located in `app/build.gradle.kts` (line 16)
-- **Increment by 1** whenever ANY file changes that will be included in the APK (essentially any code or resource change)
-- This applies to all branches—increment before committing
+**Location**: `app/build.gradle.kts` (lines 16-17)
 
-### Version Name
-- Located in `app/build.gradle.kts` (line 17)
-- Format: `"x.x, Month Date"` (e.g., `"0.5, May 3"`)
-- **Always discuss version name changes with the user first**—ask what the current version is, then they'll tell you the next one
-- Version code increments automatically; version name is a deliberate decision
+### When to Update
+Update version numbers whenever you make **any file change that affects the APK** (code, resources, strings, manifests, etc.). Do this **before committing**.
+
+### Step-by-Step Process
+
+1. **Check the current date** (system context provides this at session start)
+2. **Increment versionCode by 1**
+   - Current: Find the number on line 16
+   - New: Add 1 (e.g., 16 → 17)
+3. **Update versionName** with the format `"X.Y.Z, Month Day"`
+   - Always include today's date
+   - Example: `"0.8.1, May 12"`
+   - **Never guess**: Ask the user what the next version should be, then they tell you
+4. **Commit both together** — never commit versionCode without versionName's date, or vice versa
+5. **Include in commit message** — mention that versions were bumped (e.g., "Bump to 0.8.1 for camera handshake feature")
+
+### Why This Matters
+- **versionCode** is used by Android to determine if an update is newer; must increment for every release
+- **versionName** documents when the change was made; the date is required for tracking
+- Both must match the actual code changes; mismatches cause confusion in release notes
+
+### Example
+```
+Current: versionCode = 16, versionName = "0.8.0-camera-handshake, May 11"
+Files changed: MotherCore.kt, PhotoOrbit.kt, WorkbenchScreen.kt
+
+Action:
+- versionCode = 17
+- versionName = "0.8.1, May 12"
+
+Commit message: "feat: update MotherCore animations (versionCode 17, May 12)"
+```
 
 ## Performance Notes
 
@@ -361,7 +385,7 @@ onFileVerified(index, isValid)
 
 ### Current State
 - **origin/main** (e954385): Latest clean push with 5 batches of camera handshake + corruption detection
-- **origin/develop** (dcbbe82): Updated with CLAUDE.md documentation enhancements
+- **origin/develop** (fa339c4): Updated with CLAUDE.md documentation enhancements and version workflow
 - **local develop**: Synced to origin/develop (clean state)
 - **origin/claude-code** (58dbdd1): Ahead of develop, contains additional development history
 
