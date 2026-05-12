@@ -58,7 +58,7 @@ fun PhotoOrbit(
     receivingPhotos: List<Uri> = emptyList(),
     transferProgress: Float = 0f,
     shouldExit: Boolean = false,
-    corruptedPhotos: List<Uri> = emptyList()
+    corruptedIndices: Set<Int> = emptySet()
 ) {
     val density = LocalDensity.current
 
@@ -105,15 +105,13 @@ fun PhotoOrbit(
 
     val visiblePhotos = remember { mutableStateListOf<Uri>() }
     val exitingPhotos = remember { mutableStateSetOf<Uri>() }
-    // Each URI gets a golden-angle phase assigned once on entry — never recalculated,
-    // so adding a new photo cannot shift existing photos' positions.
     val phaseMap = remember { mutableStateMapOf<Uri, Float>() }
     var nextPhaseIndex by remember { mutableIntStateOf(0) }
 
     val successPulse = remember { Animatable(0f) }
     LaunchedEffect(transferProgress, receivingPhotos) {
         if (transferProgress < 1f && successPulse.value != 0f) {
-            successPulse.snapTo(0f)  // Reset for next transfer
+            successPulse.snapTo(0f)
         } else if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
             successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
             successPulse.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 180f))
@@ -144,7 +142,8 @@ fun PhotoOrbit(
                 val phaseOffset = phaseMap[uri] ?: 0f
                 val isExiting = uri in exitingPhotos || shouldExit
                 val isReceiving = uri in receivingPhotos
-                val isCorrupted = uri in corruptedPhotos
+                val uriIndex = receivingPhotos.indexOf(uri)
+                val isCorrupted = uriIndex >= 0 && uriIndex in corruptedIndices
                 OrbitPhotoItem(
                     uri = uri,
                     phaseOffset = phaseOffset,
@@ -193,11 +192,10 @@ private fun OrbitPhotoItem(
     val exitProgress  = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        // Skip entry animation for receiving photos — they're animated in separately
         if (!isReceiving) {
             entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
         } else {
-            entryProgress.snapTo(1f)  // Receiving photos start fully visible in orbit
+            entryProgress.snapTo(1f)
         }
     }
 
@@ -216,10 +214,9 @@ private fun OrbitPhotoItem(
     val xp = exitProgress.value
     val sp = successProgress
 
-    // Success animation: 0→0.5 = scale bloom up, 0.5→1 = scale down to zero + move to center
     val successScale = when {
-        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)  // Bloom up
-        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)  // Collapse to zero
+        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)
+        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)
     }
     val successX = if (sp > 0.5f) lerp(orbitX, coreCenter.x, (sp - 0.5f) * 2f) else orbitX
     val successY = if (sp > 0.5f) lerp(orbitY, coreCenter.y, (sp - 0.5f) * 2f) else orbitY
@@ -250,7 +247,6 @@ private fun OrbitPhotoItem(
             .drawWithCache {
                 val path = Path()
                 onDrawWithContent {
-                    // Bloom glow during success pulse
                     if (sp > 0f && sp < 1f) {
                         val bloomAlpha = (1f - abs(sp - 0.5f) * 2f) * 0.4f
                         drawCircle(
@@ -281,7 +277,6 @@ private fun OrbitPhotoItem(
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
 
-                        // Corruption indicator: red overlay for corrupted photos
                         if (isCorrupted) {
                             drawRect(
                                 color = Color.Red.copy(alpha = 0.3f),
@@ -291,6 +286,15 @@ private fun OrbitPhotoItem(
                                 color = Color.Red.copy(alpha = 0.6f),
                                 radius = size.width * 0.15f,
                                 center = Offset(size.width / 2f, size.height / 2f)
+                            )
+                        }
+                    }
+
+                    if (isCorrupted) {
+                        clipPath(path) {
+                            drawRect(
+                                color = Color.Red.copy(alpha = 0.25f),
+                                size = this.size
                             )
                         }
                     }
