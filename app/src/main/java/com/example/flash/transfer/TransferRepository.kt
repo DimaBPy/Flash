@@ -65,6 +65,7 @@ class TransferRepository(
                     _transferState.value = TransferState.Downloading(progress)
                 }
 
+                // Verify downloaded files
                 val corruptedIndices = mutableListOf<Int>()
                 files.forEachIndexed { index, file ->
                     val isValid = verifyFile(file)
@@ -86,6 +87,7 @@ class TransferRepository(
 
     private fun verifyFile(file: File): Boolean {
         return try {
+            // File exists and is readable
             file.exists() && file.canRead() && file.length() > 0
         } catch (_: Exception) {
             false

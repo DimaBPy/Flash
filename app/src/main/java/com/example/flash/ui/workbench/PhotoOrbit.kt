@@ -27,8 +27,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
@@ -39,13 +37,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
 import com.example.flash.ui.core.updateBlobPath
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.abs
 
+// Golden angle — each new photo lands at a position that never bunches with others,
+// regardless of how many photos are added over time.
 private val GOLDEN_ANGLE = (PI * (3.0 - sqrt(5.0))).toFloat()
 
 @Composable
@@ -92,7 +94,7 @@ fun PhotoOrbit(
         label = "radial_drift"
     )
 
-    val transferIntensity by animateFloatAsState(
+    val transferIntensity by androidx.compose.animation.core.animateFloatAsState(
         targetValue = transferProgress * 0.3f,
         animationSpec = tween(200),
         label = "transfer_intensity"
@@ -103,13 +105,15 @@ fun PhotoOrbit(
 
     val visiblePhotos = remember { mutableStateListOf<Uri>() }
     val exitingPhotos = remember { mutableStateSetOf<Uri>() }
+    // Each URI gets a golden-angle phase assigned once on entry — never recalculated,
+    // so adding a new photo cannot shift existing photos' positions.
     val phaseMap = remember { mutableStateMapOf<Uri, Float>() }
     var nextPhaseIndex by remember { mutableIntStateOf(0) }
 
     val successPulse = remember { Animatable(0f) }
     LaunchedEffect(transferProgress, receivingPhotos) {
         if (transferProgress < 1f && successPulse.value != 0f) {
-            successPulse.snapTo(0f)
+            successPulse.snapTo(0f)  // Reset for next transfer
         } else if ((transferProgress >= 1f || receivingPhotos.isNotEmpty()) && successPulse.value == 0f) {
             successPulse.animateTo(0.5f, spring(dampingRatio = 0.5f, stiffness = 180f))
             successPulse.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 180f))
@@ -189,10 +193,11 @@ private fun OrbitPhotoItem(
     val exitProgress  = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
+        // Skip entry animation for receiving photos — they're animated in separately
         if (!isReceiving) {
             entryProgress.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 150f))
         } else {
-            entryProgress.snapTo(1f)
+            entryProgress.snapTo(1f)  // Receiving photos start fully visible in orbit
         }
     }
 
@@ -211,9 +216,10 @@ private fun OrbitPhotoItem(
     val xp = exitProgress.value
     val sp = successProgress
 
+    // Success animation: 0→0.5 = scale bloom up, 0.5→1 = scale down to zero + move to center
     val successScale = when {
-        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)
-        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)
+        sp < 0.5f -> lerp(1f, 1.2f, sp * 2f)  // Bloom up
+        else -> lerp(1.2f, 0f, (sp - 0.5f) * 2f)  // Collapse to zero
     }
     val successX = if (sp > 0.5f) lerp(orbitX, coreCenter.x, (sp - 0.5f) * 2f) else orbitX
     val successY = if (sp > 0.5f) lerp(orbitY, coreCenter.y, (sp - 0.5f) * 2f) else orbitY
@@ -244,6 +250,7 @@ private fun OrbitPhotoItem(
             .drawWithCache {
                 val path = Path()
                 onDrawWithContent {
+                    // Bloom glow during success pulse
                     if (sp > 0f && sp < 1f) {
                         val bloomAlpha = (1f - abs(sp - 0.5f) * 2f) * 0.4f
                         drawCircle(
@@ -274,6 +281,7 @@ private fun OrbitPhotoItem(
                     clipPath(path) {
                         this@onDrawWithContent.drawContent()
 
+                        // Corruption indicator: red overlay for corrupted photos
                         if (isCorrupted) {
                             drawRect(
                                 color = Color.Red.copy(alpha = 0.3f),
