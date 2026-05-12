@@ -27,9 +27,4 @@
     <string name="corruption_question">Do you want to retry?</string>
     <string name="corruption_button_skip">Nope, never mind)</string>
     <string name="corruption_button_retry">Yeah, absolutely, I don\'t want to lose them!</string>
-    <string name="hotspot_title">No Wi-Fi?</string>
-    <string name="hotspot_subtitle">We can use your hotspot instead</string>
-    <string name="hotspot_description">Share your internet with the other device, and we\'ll handle the rest. It\'s the fastest way to get those photos across.</string>
-    <string name="hotspot_button_enable">Turn On Hotspot</string>
-    <string name="hotspot_button_cancel">Not now</string>
 </resources>

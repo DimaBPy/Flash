@@ -27,9 +27,4 @@
     <string name="corruption_question">Хотите попробовать ещё раз?</string>
     <string name="corruption_button_skip">Нет, все нормально)</string>
     <string name="corruption_button_retry">Да, абсолютно, я их не хочу потерять!</string>
-    <string name="hotspot_title">Нет Wi-Fi?</string>
-    <string name="hotspot_subtitle">Можем использовать точку доступа</string>
-    <string name="hotspot_description">Поделитесь интернетом с другим устройством, а мы позаботимся об остальном. Это самый быстрый способ обменяться фото.</string>
-    <string name="hotspot_button_enable">Включить точку доступа</string>
-    <string name="hotspot_button_cancel">Не сейчас</string>
 </resources>
