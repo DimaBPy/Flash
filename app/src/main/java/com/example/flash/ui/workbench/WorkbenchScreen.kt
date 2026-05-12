@@ -19,10 +19,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -96,7 +93,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.flash.FlashApplication
 import com.example.flash.R
+import com.example.flash.handshake.MotherCoreViewfinder
+import com.example.flash.handshake.ScanCompletePopup
 import com.example.flash.nfc.NfcManager
+import com.example.flash.ui.workbench.ColorDetectionState
 import com.example.flash.transfer.TransferRepository
 import com.example.flash.ui.core.MotherCore
 import com.example.flash.ui.shader.RippleOverlay
@@ -130,6 +130,7 @@ private val GOLDEN_ANGLE = (kotlin.math.PI * (3.0 - kotlin.math.sqrt(5.0))).toFl
 fun WorkbenchScreen(
     transferRepository: TransferRepository,
     nfcManager: NfcManager,
+    cameraHandshakeManager: com.example.flash.handshake.CameraHandshakeManager? = null,
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -141,14 +142,23 @@ fun WorkbenchScreen(
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                WorkbenchViewModel(transferRepository, nfcManager) as T
+                WorkbenchViewModel(transferRepository, nfcManager, cameraHandshakeManager) as T
         }
     )
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // ── NFC Foreground Dispatch (intercepts NFC before system dialog) ────────
-    // Enable foreground dispatch ALWAYS when screen is visible, regardless of mode
-    // This prevents Android's NFC app selector dialog from interfering with the handshake
+    LaunchedEffect(Unit) {
+        viewModel.initializeCameraHandshake()
+    }
+
+    LaunchedEffect(uiState.selectedPhotos.isEmpty()) {
+        if (uiState.selectedPhotos.isEmpty()) {
+            viewModel.startDiscoveringCameraPeers()
+        } else {
+            viewModel.stopDiscoveringCameraPeers()
+        }
+    }
+
     LaunchedEffect(Unit) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         val pendingIntent = PendingIntent.getActivity(
@@ -161,12 +171,9 @@ fun WorkbenchScreen(
             IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED),
             IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED)
         )
-        // Enable foreground dispatch in both send and receive modes
         nfcManager.enableForegroundDispatch(act, pendingIntent, filters)
     }
 
-    // ── NFC Preferred Service (receiver mode only) ──────────────────────────
-    // When receiving, set Flash as the preferred HCE service to override system NFC routing
     LaunchedEffect(uiState.isReceiving) {
         val act = context as? android.app.Activity ?: return@LaunchedEffect
         val adapter = NfcAdapter.getDefaultAdapter(context) ?: return@LaunchedEffect
@@ -189,25 +196,6 @@ fun WorkbenchScreen(
         }
     }
 
-    // ── NFC Reader Mode (HyperOS 3 workaround) ──────────────────────────────
-    // On HyperOS 3, reader mode bypasses system NFC routing that intercepts HCE.
-    // Enable reader mode when no outbound handshake (receiver side) to actively read sender's HCE.
-    LaunchedEffect(uiState.nfcState, uiState.selectedPhotos) {
-        val act = context as? android.app.Activity ?: return@LaunchedEffect
-        val hasOutbound = uiState.selectedPhotos.isNotEmpty()
-
-        if (!hasOutbound) {
-            // Receiver mode: enable reader mode to bypass HyperOS payment routing
-            nfcManager.enableReaderMode(act) { ndefMessage ->
-                nfcManager.handleNdefMessage(ndefMessage)
-            }
-        } else {
-            // Sender mode: disable reader mode
-            nfcManager.disableReaderMode(act)
-        }
-    }
-
-    // ── Permission + auto-load camera roll ───────────────────────────────────
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
@@ -224,13 +212,11 @@ fun WorkbenchScreen(
         if (allGranted) viewModel.loadGalleryPhotos(context) else permissionLauncher.launch(needed)
     }
 
-    // ── Zero-click NFC download ──────────────────────────────────────────────
     LaunchedEffect(uiState.nfcState) {
         val s = uiState.nfcState
         if (s is NfcUiState.PeerDetected) viewModel.startDownload(s.handshake, context)
     }
 
-    // ── Camera cutout → blob-local offset ────────────────────────────────────
     val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
     val blobSizePx     = with(density) { BLOB_SIZE_DP.toPx() }
 
@@ -254,10 +240,9 @@ fun WorkbenchScreen(
     var exitEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(600L); exitEnabled = true }
 
-    // Auto-trigger gallery transition after receiving photos settle in orbit (~3 seconds)
     LaunchedEffect(uiState.receivingPhotos) {
         if (uiState.receivingPhotos.isNotEmpty() && !shouldStartGalleryTransition) {
-            delay(3000L)  // Let them orbit for a bit
+            delay(3000L)
             shouldStartGalleryTransition = true
             viewModel.startGalleryTransitionForReceivingPhotos()
         }
@@ -275,12 +260,10 @@ fun WorkbenchScreen(
         }
     }
 
-    // Close settings panel on back press
     BackHandler(enabled = showSettings) { showSettings = false }
 
-    val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris, context) }
+    val photoPicker      = rememberPhotoPicker { uris -> viewModel.onPhotosSelected(uris) }
 
-    // ── Single shared backdrop — grid is the capture source for all glass ───
     val backdrop = rememberLayerBackdrop()
 
     val bgAlpha by animateFloatAsState(
@@ -290,7 +273,6 @@ fun WorkbenchScreen(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // ── Sliding content (everything except MotherCore) ───────────────────
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -300,7 +282,6 @@ fun WorkbenchScreen(
                 )
                 .systemBarsPadding()
         ) {
-        // ── Full-screen photo grid — source for all glass effects ────────────
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(8.dp),
@@ -316,33 +297,30 @@ fun WorkbenchScreen(
                     isInOrbit = uri in uiState.selectedPhotos,
                     onTap = {
                         if (uri in uiState.selectedPhotos) viewModel.onPhotoRemovedFromOrbit(uri)
-                        else                               viewModel.onPhotoAddedToOrbit(uri, context)
+                        else                               viewModel.onPhotoAddedToOrbit(uri)
                     }
                 )
             }
         }
 
-        // ── Orbiting selected photos & received photos ─────────────────────────
         PhotoOrbit(
             photos           = uiState.selectedPhotos.toList(),
             coreCenter       = coreCenter,
             receivingPhotos  = uiState.receivingPhotos,
             transferProgress = uiState.transferProgress,
             shouldExit       = uiState.shouldExit,
-            corruptedPhotos  = uiState.corruptedPhotos
+            corruptedIndices = uiState.corruptedIndicesInOrbit
         )
 
-        // ── Received photos materializing into orbit ─────────────────────────
         uiState.receivingPhotos.forEachIndexed { index, uri ->
             ReceivedPhotoMaterializeFlyer(
                 uri = uri,
                 coreCenter = coreCenter,
                 phaseOffset = index * (2f * kotlin.math.PI.toFloat() / uiState.receivingPhotos.size)
-                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)  // offset by existing photos
+                    + (uiState.selectedPhotos.size * GOLDEN_ANGLE)
             )
         }
 
-        // ── Received photos flying from orbit into gallery ────────────────────
         if (uiState.receivingPhotos.isNotEmpty() && shouldStartGalleryTransition) {
             uiState.receivingPhotos.forEachIndexed { index, uri ->
                 ReceivedPhotoOrbitToGalleryFlyer(
@@ -353,7 +331,25 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── Bottom area: two buttons or settings panel ───────────────────────
+        LaunchedEffect(uiState.colorDetectionState) {
+            if (uiState.colorDetectionState == ColorDetectionState.Locked) {
+                delay(400)
+                viewModel.onColorConfirmed(context)
+            }
+        }
+
+        val showScanPopup = uiState.colorDetectionState == ColorDetectionState.Locked
+        val scanPopupColor = uiState.detectedPeerColor?.displayColor
+        if (scanPopupColor != null) {
+            ScanCompletePopup(
+                visible = showScanPopup,
+                lockedColor = scanPopupColor,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp)
+            )
+        }
+
         SharedTransitionLayout(
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
@@ -366,13 +362,11 @@ fun WorkbenchScreen(
                 label = "settings_transform"
             ) { isOpen ->
                 if (!isOpen) {
-                    // ── Two liquid buttons with spacer ───────────────────────
                     Row(
                         modifier = Modifier.padding(bottom = 24.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // Exit button
                         LiquidButton(
                             onClick      = { viewModel.onExitRequested() },
                             backdrop     = backdrop,
@@ -389,7 +383,6 @@ fun WorkbenchScreen(
 
                         Spacer(Modifier.width(12.dp))
 
-                        // Settings button — sharedBounds connects it to the panel
                         LiquidButton(
                             onClick      = { showSettings = true },
                             backdrop     = backdrop,
@@ -412,7 +405,6 @@ fun WorkbenchScreen(
                         }
                     }
                 } else {
-                    // ── Settings panel expands from the button ───────────────
                     SettingsPanel(
                         themeRepository = app.themeRepository,
                         backdrop        = backdrop,
@@ -430,7 +422,6 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── "+" liquid glass button — hidden when settings panel is open ─────
         AnimatedVisibility(
             visible = !showSettings,
             enter   = fadeIn(tween(300)) + scaleIn(tween(300), initialScale = 0.85f),
@@ -452,7 +443,6 @@ fun WorkbenchScreen(
             }
         }
 
-        // ── AGSL ripple on transfer complete ─────────────────────────────────
         if (uiState.showRipple) {
             RippleOverlay(
                 coreCenter = coreCenter,
@@ -460,33 +450,14 @@ fun WorkbenchScreen(
             )
         }
 
-        // ── Update Wi-Fi status periodically ────────────────────────────────────
-        LaunchedEffect(Unit) {
-            viewModel.updateWifiStatus(context)
-        }
-
-        // ── Hotspot prompt modal ────────────────────────────────────────────────
-        HotspotPromptModal(
-            visible = uiState.showHotspotPrompt,
-            backdrop = backdrop,
-            onDismiss = { viewModel.dismissHotspotPrompt() },
-            onEnable = {
-                val intent = android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
-                context.startActivity(intent)
-                viewModel.dismissHotspotPrompt()
-            }
-        )
-
-        // ── Corruption alert modal ──────────────────────────────────────────
         CorruptionAlert(
             corruptedPhotos = uiState.corruptedPhotos,
             backdrop = backdrop,
             onDismiss = { viewModel.dismissCorruptionAlert() },
-            onRetry = { viewModel.retryCorruptedPhotos() }
+            onRetry = { viewModel.retryCorruptedPhotos(context) }
         )
         } // end sliding Box
 
-        // ── MotherCore: outside sliding box, counter-translated to stay fixed ─
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -496,25 +467,56 @@ fun WorkbenchScreen(
                     val pos = coords.positionInParent()
                     val sz  = coords.size
                     coreCenter = Offset(pos.x + sz.width / 2f, pos.y + sz.height / 2f)
-                }
+                },
+            contentAlignment = Alignment.Center
         ) {
+            if (uiState.colorDetectionState == ColorDetectionState.Detecting ||
+                uiState.colorDetectionState == ColorDetectionState.Locked) {
+                val peerColor = uiState.detectedPeerColor
+                if (peerColor != null) {
+                    MotherCoreViewfinder(
+                        targetColor = peerColor.displayColor,
+                        onMatchStrengthChanged = { viewModel.onDetectionStrengthChanged(it) },
+                        onColorLocked = { viewModel.onColorLocked() }
+                    )
+                }
+            }
+
+            val lockedAccent = if (uiState.colorDetectionState == ColorDetectionState.Locked) {
+                uiState.detectedPeerColor?.displayColor?.let {
+                    androidx.compose.ui.graphics.Color(it)
+                }
+            } else null
+
             MotherCore(
                 progress     = uiState.transferProgress,
                 isReceiving  = uiState.isReceiving,
                 shouldExit   = uiState.shouldExit,
                 cutoutOffset = cutoutOffset,
                 backdrop     = backdrop,
+                accentColor  = lockedAccent,
                 onAnimationComplete = {
                     val activity = context as? android.app.Activity
                     @Suppress("DEPRECATION") activity?.overridePendingTransition(0, 0)
                     activity?.finish()
                 }
             )
+
+            if (uiState.colorDetectionState == ColorDetectionState.Detecting) {
+                androidx.compose.material3.Text(
+                    text = "Point at their MotherCore",
+                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(top = 180.dp)
+                )
+            }
         }
+
     }
 }
 
-// ── Liquid glass segmented button row ──────────────────────────────────────
 @Composable
 private fun <T> LiquidSegmentedButtonRow(
     items: List<T>,
@@ -569,7 +571,6 @@ private fun <T> LiquidSegmentedButtonRow(
     }
 }
 
-// ── Settings panel: liquid glass bottom container ───────────────────────────
 @Composable
 private fun SettingsPanel(
     themeRepository: ThemeRepository,
@@ -596,7 +597,6 @@ private fun SettingsPanel(
             )
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
-        // ── Liquid glass close button ────────────────────────────────────────
         LiquidButton(
             onClick      = onClose,
             backdrop     = backdrop,
@@ -615,7 +615,6 @@ private fun SettingsPanel(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            // ── Liquid glass "Settings" title pill ───────────────────────────
             Box(
                 modifier = Modifier
                     .drawBackdrop(
@@ -668,7 +667,6 @@ private fun SettingsPanel(
     }
 }
 
-// ── Received photo materializing into orbit ────────────────────────────────────
 @Composable
 private fun ReceivedPhotoMaterializeFlyer(
     uri: Uri,
@@ -683,9 +681,8 @@ private fun ReceivedPhotoMaterializeFlyer(
     }
 
     val progress = animProgress.value
-    if (progress >= 1f) return  // Animation complete, now in orbit via PhotoOrbit
+    if (progress >= 1f) return
 
-    // Phase 1 (0-0.15): Materialize with scale pulse at blob center
     val pulsePhase = (progress / 0.15f).coerceIn(0f, 1f)
     val pulseScale = if (pulsePhase < 0.5f) {
         lerp(0f, 1.2f, pulsePhase * 2f)
@@ -693,7 +690,6 @@ private fun ReceivedPhotoMaterializeFlyer(
         lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
     }
 
-    // Phase 2 (0.15-1): Fly outward to orbit position
     val flightPhase = ((progress - 0.15f) / 0.85f).coerceIn(0f, 1f)
 
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
@@ -728,7 +724,6 @@ private fun ReceivedPhotoMaterializeFlyer(
     )
 }
 
-// ── Received photo flying from orbit into gallery ─────────────────────────────
 @Composable
 private fun ReceivedPhotoOrbitToGalleryFlyer(
     uri: Uri,
@@ -743,7 +738,7 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     }
 
     val progress = animProgress.value
-    if (progress >= 1f) return  // Animation complete, now in gallery
+    if (progress >= 1f) return
 
     val gridItemSizeDp = 100.dp
     val paddingDp = 8.dp
@@ -758,12 +753,10 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
         paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
     }
 
-    // Start from current orbit position (roughly at base radius)
     val baseOrbitRadiusPx = with(density) { 100.dp.toPx() }
     val orbitX = coreCenter.x + baseOrbitRadiusPx
     val orbitY = coreCenter.y
 
-    // Fly from orbit to gallery position
     val x = lerp(orbitX, targetX, progress)
     val y = lerp(orbitY, targetY, progress)
 
@@ -784,80 +777,6 @@ private fun ReceivedPhotoOrbitToGalleryFlyer(
     )
 }
 
-// ── Received photo flying into gallery ──────────────────────────────────────────
-@Composable
-private fun ReceivedPhotoFlyer(
-    uri: Uri,
-    coreCenter: Offset,
-    gridItemIndex: Int
-) {
-    val density = LocalDensity.current
-    val animProgress = remember { Animatable(0f) }
-
-    LaunchedEffect(Unit) {
-        animProgress.animateTo(1f, tween(2000, easing = FastOutSlowInEasing))
-    }
-
-    val progress = animProgress.value
-
-    // Only render while animating; once complete, photo is in gallery at Z0
-    if (progress >= 1f) return
-
-    val gridItemSizeDp = 100.dp
-    val paddingDp = 8.dp
-    val gapDp = 4.dp
-    val col = gridItemIndex % 3
-    val row = gridItemIndex / 3
-
-    val targetX = with(density) {
-        paddingDp.toPx() + col * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
-    }
-    val targetY = with(density) {
-        paddingDp.toPx() + row * (gridItemSizeDp.toPx() + gapDp.toPx()) + gridItemSizeDp.toPx() / 2f
-    }
-
-    // Phase 1 (0-0.2): Materialize with scale pulse + brief orbit glow
-    val pulsePhase = (progress / 0.2f).coerceIn(0f, 1f)
-    val pulseScale = if (pulsePhase < 0.5f) {
-        lerp(0f, 1.2f, pulsePhase * 2f)
-    } else {
-        lerp(1.2f, 1f, (pulsePhase - 0.5f) * 2f)
-    }
-
-    // Phase 2 (0.2-0.4): Move horizontally to clear blob
-    val horizontalPhase = ((progress - 0.2f) / 0.2f).coerceIn(0f, 1f)
-    val horizontalDir = if (targetX < coreCenter.x) -1f else 1f
-    val clearDistance = with(density) { 150.dp.toPx() }
-    val clearX = coreCenter.x + (clearDistance * horizontalDir * horizontalPhase)
-
-    // Phase 3 (0.4-1): Fly to target grid position at Z1
-    val flightPhase = ((progress - 0.4f) / 0.6f).coerceIn(0f, 1f)
-    val x = lerp(clearX, targetX, flightPhase)
-    val y = lerp(coreCenter.y, targetY, flightPhase)
-
-    AsyncImage(
-        model = uri,
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = Modifier
-            .size(gridItemSizeDp)
-            .offset {
-                IntOffset(
-                    (x - gridItemSizeDp.toPx() / 2f).roundToInt(),
-                    (y - gridItemSizeDp.toPx() / 2f).roundToInt()
-                )
-            }
-            .clip(RoundedCornerShape(12.dp))
-            .graphicsLayer {
-                val displayScale = if (progress < 0.2f) pulseScale else 1f
-                scaleX = displayScale
-                scaleY = displayScale
-            }
-            .zIndex(1f)
-    )
-}
-
-// ── Photo grid item ─────────────────────────────────────────────────────────────
 @Composable
 private fun PhotoGridItem(
     uri: Uri,
@@ -884,7 +803,6 @@ private fun PhotoGridItem(
     }
 }
 
-// ── Corruption Alert Modal ──────────────────────────────────────────────────
 @Composable
 private fun CorruptionAlert(
     corruptedPhotos: List<Uri>,
@@ -918,13 +836,7 @@ private fun CorruptionAlert(
                     .drawBackdrop(
                         backdrop = backdrop,
                         shape = { RoundedCornerShape(20.dp) },
-                        effects = {
-                            vibrancy()
-                            blur(6f.dp.toPx())
-                        },
-                        onDrawSurface = {
-                            drawRect(OceanAqua.copy(alpha = 0.05f))
-                        }
+                        effects = { vibrancy(); blur(6f.dp.toPx()) }
                     )
                     .padding(24.dp)
             ) {
@@ -950,7 +862,6 @@ private fun CorruptionAlert(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
 
-                    // Corrupted photos as circles in circular arrangement
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -958,7 +869,7 @@ private fun CorruptionAlert(
                         contentAlignment = Alignment.Center
                     ) {
                         corruptedPhotos.forEachIndexed { index, uri ->
-                            val angle = (index.toFloat() / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
+                            val angle = (index / corruptedPhotos.size.coerceAtLeast(1)) * 2f * kotlin.math.PI.toFloat()
                             val radiusPx = 70f
                             val offsetX = (radiusPx * kotlin.math.cos(angle)).toInt()
                             val offsetY = (radiusPx * kotlin.math.sin(angle)).toInt()
@@ -1039,134 +950,6 @@ private fun CorruptionAlert(
                         ) {
                             Text(
                                 text = stringResource(R.string.corruption_button_retry),
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelMedium,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Hotspot Prompt Modal ──────────────────────────────────────────────────
-/** Animated modal prompting user to enable hotspot when selecting photos without Wi-Fi. */
-@Composable
-private fun HotspotPromptModal(
-    visible: Boolean,
-    backdrop: Backdrop,
-    onDismiss: () -> Unit,
-    onEnable: () -> Unit
-) {
-    val scaleAnim = remember { Animatable(0.25f) }
-
-    LaunchedEffect(visible) {
-        if (visible) {
-            scaleAnim.snapTo(0.25f)
-            scaleAnim.animateTo(1f, tween(600, easing = FastOutSlowInEasing))
-        }
-    }
-
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.3f),
-        exit = fadeOut(tween(250)) + scaleOut(tween(250), targetScale = 0.3f),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.4f))
-                .clickable(enabled = false) {},
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .wrapContentHeight()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(
-                        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
-                    )
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { RoundedCornerShape(24.dp) },
-                        effects = {
-                            vibrancy()
-                            blur(8f.dp.toPx())
-                        },
-                        onDrawSurface = {
-                            drawRect(OceanAqua.copy(alpha = 0.08f))
-                        }
-                    )
-                    .graphicsLayer {
-                        scaleX = scaleAnim.value
-                        scaleY = scaleAnim.value
-                    }
-                    .padding(28.dp)
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = stringResource(R.string.hotspot_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.hotspot_subtitle),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-
-                    Text(
-                        text = stringResource(R.string.hotspot_description),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 20.dp)
-                    )
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        LiquidButton(
-                            onClick = onDismiss,
-                            backdrop = backdrop,
-                            enabled = true,
-                            surfaceColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.hotspot_button_cancel),
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelMedium,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-
-                        LiquidButton(
-                            onClick = onEnable,
-                            backdrop = backdrop,
-                            enabled = true,
-                            surfaceColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.hotspot_button_enable),
                                 color = Color.White,
                                 style = MaterialTheme.typography.labelMedium,
                                 textAlign = TextAlign.Center
