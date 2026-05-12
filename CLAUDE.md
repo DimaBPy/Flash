@@ -361,7 +361,7 @@ onFileVerified(index, isValid)
 
 ### Current State
 - **origin/main** (e954385): Latest clean push with 5 batches of camera handshake + corruption detection
-- **origin/develop** (77a77f4): Updated with CLAUDE.md documentation enhancements
+- **origin/develop** (dcbbe82): Updated with CLAUDE.md documentation enhancements
 - **local develop**: Synced to origin/develop (clean state)
 - **origin/claude-code** (58dbdd1): Ahead of develop, contains additional development history
 
@@ -388,28 +388,8 @@ Result: main got the final code, develop kept intermediate commits. Now synced v
   - Reason: Code was changed on May 11-12; versionName currently says "May 11"
 - [ ] **Sync origin/develop to origin/main** (only if you have push access)
   - This prevents develop from diverging; keeps branches aligned
-  - If 403 persists, document in "Troubleshooting" section below
 - [ ] **Clean up abandoned branches** (optional but recommended)
   - Delete: origin/claude/flash-nfc-app-C8Hki, origin/claude/resume-after-network-issues-BHf1r
-
-## Troubleshooting
-
-### Git Push 403 Errors
-If you encounter HTTP 403 "The requested URL returned error: 403" on `git push`:
-1. **Not an authentication issue** — credentials are configured (HTTP basic auth working for fetch)
-2. **Likely causes**:
-   - Server-side protection blocking push (check if it's a temporary protection rule)
-   - Temporary network/proxy issue (try again after 5 minutes)
-3. **Workaround**: Use GitHub API `mcp__github__push_files` tool to push to a specific branch
-   - Format: Push multiple files with a commit message to branch of choice
-   - No interactive permissions; declare files as `[{"path": "...", "content": "..."}, ...]`
-
-### Version Code / Name Drift
-If you see versionCode lagging behind actual code changes:
-1. Check CLAUDE.md "Version management" section (line 65)
-2. Increment versionCode by 1 for every APK-affecting change
-3. Always update versionName with current date (system context provides `currentDate`)
-4. Commit versionCode+versionName together; never one without the other
 
 ## How to Update This File in Future Sessions
 
