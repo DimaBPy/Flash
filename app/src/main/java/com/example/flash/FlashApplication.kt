@@ -25,6 +25,7 @@ class FlashApplication : Application() {
             scope  = applicationScope
         )
     }
+
     val cameraHandshakeManager: CameraHandshakeManager? by lazy {
         if (DeviceDetector.isHyperOSDevice()) {
             CameraHandshakeManager(this)
@@ -32,6 +33,7 @@ class FlashApplication : Application() {
             null
         }
     }
+
     companion object {
         lateinit var instance: FlashApplication
             private set
