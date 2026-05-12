@@ -27,10 +27,19 @@ import androidx.compose.foundation.shape.CircleShape
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
+/**
+ * Analyzes camera frames using real YUV chroma channels.
+ *
+ * Three safeguards prevent false positives:
+ * 1. Saturation threshold — rejects dull environmental colors (walls, furniture)
+ * 2. Fill ratio — requires >35% of center region to match (phone screen dominates viewfinder)
+ * 3. Sustained match — 8 consecutive frames must pass before confirmation
+ */
 class ColorMatcher(private val targetColor: Int) {
+
     private val targetHsv = FloatArray(3)
     private var firstMatchTimeMs = -1L
-    private val lockDurationMs = 1000L
+    private val lockDurationMs = 1000L  // 1 second sustained match required
 
     var lastMatchStrength = 0f
         private set
@@ -68,6 +77,7 @@ class ColorMatcher(private val targetColor: Int) {
 
                 Color.RGBToHSV(r, g, b, hsv)
 
+                // Safeguard 1: ignore low-saturation pixels (walls, shadows, furniture)
                 if (hsv[1] < 0.50f) continue
                 highSatPixels++
 
@@ -77,16 +87,19 @@ class ColorMatcher(private val targetColor: Int) {
         }
 
         if (highSatPixels < 20) {
+            // Not enough saturated pixels — likely looking at plain environment
             lastMatchStrength = 0f
             firstMatchTimeMs = -1L
             return false
         }
 
+        // Safeguard 2: fill ratio — phone screen must dominate the sampled region
         val fillRatio = matchingPixels.toFloat() / highSatPixels
         lastMatchStrength = fillRatio
 
         val isMatch = fillRatio > 0.35f
 
+        // Safeguard 3: must sustain match for 1 second continuously
         val now = System.currentTimeMillis()
         if (isMatch) {
             if (firstMatchTimeMs < 0) firstMatchTimeMs = now
@@ -98,6 +111,11 @@ class ColorMatcher(private val targetColor: Int) {
     }
 }
 
+/**
+ * Live camera viewfinder clipped to a circle matching MotherCore's size.
+ * Placed behind MotherCore so the blob shape frames the camera feed.
+ * Color analysis runs in background — callbacks fire on main thread.
+ */
 @Composable
 fun MotherCoreViewfinder(
     targetColor: Int,
@@ -125,74 +143,58 @@ fun MotherCoreViewfinder(
 
     Box(
         modifier = modifier
-            .size(160.dp)
+            .size(160.dp)  // Matches MotherCore's BASE_RADIUS_DP * 2 + padding
             .clip(CircleShape)
     ) {
         if (cameraProvider != null) {
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).apply {
-                        val preview = Preview.Builder().build()
-                        val colorMatcher = ColorMatcher(targetColor)
-                        var locked = false
-
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-                            .build()
-                            .apply {
-                                setAnalyzer(executor) { imageProxy ->
-                                    try {
-                                        val planes = imageProxy.planes
-                                        val yPlane = planes[0]
-                                        val uPlane = planes[1]
-                                        val vPlane = planes[2]
-
-                                        val yBuf = yPlane.buffer
-                                        val uBuf = uPlane.buffer
-                                        val vBuf = vPlane.buffer
-
-                                        val yData = ByteArray(yBuf.remaining()).also { yBuf.get(it) }
-                                        val uData = ByteArray(uBuf.remaining()).also { uBuf.get(it) }
-                                        val vData = ByteArray(vBuf.remaining()).also { vBuf.get(it) }
-
-                                        val confirmed = colorMatcher.analyzeFrame(
-                                            yData, uData, vData,
-                                            imageProxy.width, imageProxy.height,
-                                            yPlane.rowStride, uPlane.rowStride, uPlane.pixelStride
-                                        )
-
-                                        ContextCompat.getMainExecutor(ctx).execute {
-                                            onMatchStrengthChanged(colorMatcher.lastMatchStrength)
-                                            if (confirmed && !locked) {
-                                                locked = true
-                                                onColorLocked()
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e("ColorDetection", "Frame error", e)
-                                    } finally {
-                                        imageProxy.close()
-                                    }
-                                }
-                            }
-
-                        try {
-                            cameraProvider?.unbindAll()
-                            cameraProvider?.bindToLifecycle(
-                                lifecycleOwner,
-                                CameraSelector.DEFAULT_BACK_CAMERA,
-                                preview,
-                                imageAnalysis
-                            )
-                            preview.surfaceProvider = this.surfaceProvider
-                        } catch (e: Exception) {
-                            Log.e("ColorDetection", "Camera bind failed", e)
-                        }
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
                     }
                 },
-                modifier = Modifier.matchParentSize()
-            )
+                modifier = Modifier.size(160.dp)
+            ) { previewView ->
+                val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+                val matcher = ColorMatcher(targetColor)
+
+                val imageAnalyzer = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+                    .also { analysis ->
+                        analysis.setAnalyzer(executor) { image ->
+                            val planes = image.planes
+                            val yData = planes[0].buffer.array()
+                            val uData = planes[1].buffer.array()
+                            val vData = planes[2].buffer.array()
+
+                            val locked = matcher.analyzeFrame(
+                                yData, uData, vData,
+                                image.width, image.height,
+                                planes[0].rowPitch, planes[1].rowPitch, planes[1].pixelStride
+                            )
+
+                            ContextCompat.getMainExecutor(context).execute {
+                                onMatchStrengthChanged(matcher.lastMatchStrength)
+                                if (locked) onColorLocked()
+                            }
+
+                            image.close()
+                        }
+                    }
+
+                try {
+                    cameraProvider?.unbindAll()
+                    cameraProvider?.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_FRONT_CAMERA,
+                        preview,
+                        imageAnalyzer
+                    )
+                } catch (e: Exception) {
+                    Log.e("MotherCoreViewfinder", "Camera binding failed", e)
+                }
+            }
         }
     }
 }

@@ -76,6 +76,7 @@ fun ScanCompletePopup(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Color swatch
                 Box(
                     modifier = Modifier
                         .size(32.dp)

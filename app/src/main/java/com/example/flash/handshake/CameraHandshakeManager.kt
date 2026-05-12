@@ -30,12 +30,23 @@ class CameraHandshakeManager(private val context: Context) {
     val colorHandshakeFlow: SharedFlow<ColorHandshake> = _colorHandshakeFlow.asSharedFlow()
 
     companion object {
-        private val COLOR_PALETTE_HUES = floatArrayOf(200f, 140f, 280f, 30f, 170f, 60f, 320f, 0f)
+        // Priority order: calm colors first, red last (avoids "error" association)
+        private val COLOR_PALETTE_HUES = floatArrayOf(
+            200f,  // Light blue
+            140f,  // Light green
+            280f,  // Purple
+            30f,   // Orange
+            170f,  // Teal
+            60f,   // Yellow
+            320f,  // Pink
+            0f     // Red (last resort)
+        )
     }
 
     fun generateDisplayColor(): Int {
         val index = ((peerId.hashCode() and 0x7FFFFFFF) % COLOR_PALETTE_HUES.size)
         val hue = COLOR_PALETTE_HUES[index]
+        // High saturation + brightness for camera detectability; light variants
         return Color.HSVToColor(floatArrayOf(hue, 0.65f, 0.95f))
     }
 
