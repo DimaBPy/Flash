@@ -381,40 +381,6 @@ onFileVerified(index, isValid)
 3. `PhotoOrbit` marks photos where `uriIndex in corruptedIndices`
 4. On transfer complete, `CorruptionAlert` modal shows verified results
 
-## Branch State & Git Workflow (May 12, 2026)
-
-### Current State
-- **origin/main** (e954385): Latest clean push with 5 batches of camera handshake + corruption detection
-- **origin/develop** (fa339c4): Updated with CLAUDE.md documentation enhancements and version workflow
-- **local develop**: Synced to origin/develop (clean state)
-- **origin/claude-code** (58dbdd1): Ahead of develop, contains additional development history
-
-### Why Develop Had Divergence
-During the previous session:
-1. Merged claude-code → develop locally
-2. Encountered git push 403 errors (authentication issue)
-3. Bypassed by pushing directly to main via GitHub API (5 clean batches)
-4. Closed PRs #31, #32
-
-Result: main got the final code, develop kept intermediate commits. Now synced via API push.
-
-### Recommended Next Session Actions
-1. **Sync develop to main**: Reset origin/develop to origin/main to align branches
-2. **Update claude-code**: Rebase origin/claude-code on top of develop
-3. **Delete old branches**: Remove the abandoned branches (origin/claude/flash-nfc-app-*, origin/claude/resume-after-network-issues-*)
-
-## Short-Term Tasks (Do in Next Session, Then Delete This Section)
-
-**IMPORTANT**: Delete this entire section after completing all items.
-
-- [ ] **Update version numbers on main** (versionCode = 17, versionName = "0.8.1, May 12")
-  - File: `app/build.gradle.kts` lines 16-17
-  - Reason: Code was changed on May 11-12; versionName currently says "May 11"
-- [ ] **Sync origin/develop to origin/main** (only if you have push access)
-  - This prevents develop from diverging; keeps branches aligned
-- [ ] **Clean up abandoned branches** (optional but recommended)
-  - Delete: origin/claude/flash-nfc-app-C8Hki, origin/claude/resume-after-network-issues-BHf1r
-
 ## How to Update This File in Future Sessions
 
 ### Adding Architectural Insights
@@ -454,6 +420,3 @@ A: Golden angle (137.5°) ensures each new photo lands in the largest empty gap,
 
 **Q: Why push directly to main via API instead of git push?**
 A: HTTP 403 blocks all git push attempts (even force push). GitHub API `push_files` tool bypasses this by committing directly to a branch. Used when normal git workflow is blocked by infrastructure issues.
-
-**Q: Why is develop ahead of main?**
-A: During the previous session, local develop accumulated intermediate commits while main got the final API pushes. This divergence should be cleaned up in the next session by resetting develop to main.
